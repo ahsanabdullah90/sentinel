@@ -65,7 +65,9 @@ export class TokenBucketRateLimiter {
     return new Promise<void>((resolve) => {
       const attemptAcquire = async () => {
         if (this.isPausedForCaptcha) {
-          this.pendingRequests.push(() => { void attemptAcquire(); });
+          this.pendingRequests.push(() => {
+            void attemptAcquire();
+          });
           return;
         }
 
@@ -88,7 +90,12 @@ export class TokenBucketRateLimiter {
           // Calculate time until next refill and wait
           const now = Date.now();
           const timeUntilRefill = this.refillIntervalMs - (now - this.lastRefill);
-          setTimeout(() => { void attemptAcquire(); }, Math.max(0, timeUntilRefill));
+          setTimeout(
+            () => {
+              void attemptAcquire();
+            },
+            Math.max(0, timeUntilRefill)
+          );
         }
       };
 

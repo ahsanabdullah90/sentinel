@@ -120,12 +120,10 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
               }}
             />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-            <button
-              className="btn btn-secondary"
-              onClick={onClose}
-              style={{ padding: '8px 15px' }}
-            >
+          <div
+            style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}
+          >
+            <button className="btn btn-secondary" onClick={onClose} style={{ padding: '8px 15px' }}>
               Cancel
             </button>
             <button

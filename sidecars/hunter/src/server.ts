@@ -93,7 +93,7 @@ server.addService(hunterProto.hunter.HunterService.service, {
 });
 
 const PORT = process.env.PORT ?? 50051;
-const bindAddress = "0.0.0.0:" + String(PORT);
+const bindAddress = '0.0.0.0:' + String(PORT);
 
 server.bindAsync(bindAddress, grpc.ServerCredentials.createInsecure(), (err, port) => {
   if (err) {

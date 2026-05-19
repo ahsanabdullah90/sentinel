@@ -114,7 +114,7 @@ export class GenericSearchStrategy implements ScrapingStrategy {
       const keywordsStr = config.keywords || 'RFP';
       const keywordList = keywordsStr
         .split(/[,;\n]+/)
-        .map(k => k.trim())
+        .map((k) => k.trim())
         .filter(Boolean);
 
       if (keywordList.length === 0) {
@@ -143,7 +143,7 @@ export class GenericSearchStrategy implements ScrapingStrategy {
           // Direct high-fidelity query URL routing to ensure 100% stable searches
           let targetUrl = config.baseUrl;
           const isDirectQuerySupported = targetUrl.includes('resume.brightspyre.com');
-          
+
           if (isDirectQuerySupported) {
             const queryVal = encodeURIComponent(keyword);
             targetUrl = `https://resume.brightspyre.com/jobs?query=${queryVal}`;
@@ -163,23 +163,34 @@ export class GenericSearchStrategy implements ScrapingStrategy {
             if (!searchSelector) {
               // Run heuristic on-the-fly search input detector
               searchSelector = await page.evaluate(() => {
-                const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
+                const inputs = Array.from(
+                  document.querySelectorAll(
+                    'input[type="text"], input[type="search"], input:not([type])'
+                  )
+                );
                 for (const input of inputs) {
                   const id = input.id.toLowerCase();
                   const name = (input.getAttribute('name') || '').toLowerCase();
                   const placeholder = (input.getAttribute('placeholder') || '').toLowerCase();
                   const className = input.className.toLowerCase();
-                  
+
                   if (
-                    id.includes('search') || id.includes('query') || id.includes('q') ||
-                    name.includes('search') || name.includes('query') || name.includes('q') ||
-                    placeholder.includes('search') || placeholder.includes('find') || placeholder.includes('query') ||
+                    id.includes('search') ||
+                    id.includes('query') ||
+                    id.includes('q') ||
+                    name.includes('search') ||
+                    name.includes('query') ||
+                    name.includes('q') ||
+                    placeholder.includes('search') ||
+                    placeholder.includes('find') ||
+                    placeholder.includes('query') ||
                     className.includes('search')
                   ) {
                     if (input.id) return `#${input.id}`;
                     const nameAttr = input.getAttribute('name');
                     if (nameAttr) return `input[name="${nameAttr}"]`;
-                    if (input.getAttribute('placeholder')) return `input[placeholder="${input.getAttribute('placeholder')}"]`;
+                    if (input.getAttribute('placeholder'))
+                      return `input[placeholder="${input.getAttribute('placeholder')}"]`;
                   }
                 }
                 if (inputs.length > 0) {
@@ -202,20 +213,24 @@ export class GenericSearchStrategy implements ScrapingStrategy {
               );
               try {
                 await page.fill(searchSelector, keyword);
-                
+
                 const clickedButton = await page.evaluate((sel) => {
                   const input = document.querySelector(sel) as HTMLInputElement;
                   if (!input) return false;
-                  
+
                   const form = input.closest('form');
                   if (form) {
                     form.submit();
                     return true;
                   }
-                  
+
                   const parent = input.parentElement;
                   if (parent) {
-                    const buttons = Array.from(parent.querySelectorAll('button, input[type="button"], input[type="submit"], #searchButton, .search, #search'));
+                    const buttons = Array.from(
+                      parent.querySelectorAll(
+                        'button, input[type="button"], input[type="submit"], #searchButton, .search, #search'
+                      )
+                    );
                     for (const btn of buttons) {
                       if (btn !== input) {
                         (btn as HTMLElement).click();
@@ -223,13 +238,15 @@ export class GenericSearchStrategy implements ScrapingStrategy {
                       }
                     }
                   }
-                  
-                  const globalBtn = document.querySelector('#searchButton, .btn-search, button[type="submit"], .search-btn');
+
+                  const globalBtn = document.querySelector(
+                    '#searchButton, .btn-search, button[type="submit"], .search-btn'
+                  );
                   if (globalBtn) {
                     (globalBtn as HTMLElement).click();
                     return true;
                   }
-                  
+
                   return false;
                 }, searchSelector);
 
@@ -254,23 +271,34 @@ export class GenericSearchStrategy implements ScrapingStrategy {
           // Detect search selector on the loaded page if not already done
           if (!searchSelector) {
             searchSelector = await page.evaluate(() => {
-              const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
+              const inputs = Array.from(
+                document.querySelectorAll(
+                  'input[type="text"], input[type="search"], input:not([type])'
+                )
+              );
               for (const input of inputs) {
                 const id = input.id.toLowerCase();
                 const name = (input.getAttribute('name') || '').toLowerCase();
                 const placeholder = (input.getAttribute('placeholder') || '').toLowerCase();
                 const className = input.className.toLowerCase();
-                
+
                 if (
-                  id.includes('search') || id.includes('query') || id.includes('q') ||
-                  name.includes('search') || name.includes('query') || name.includes('q') ||
-                  placeholder.includes('search') || placeholder.includes('find') || placeholder.includes('query') ||
+                  id.includes('search') ||
+                  id.includes('query') ||
+                  id.includes('q') ||
+                  name.includes('search') ||
+                  name.includes('query') ||
+                  name.includes('q') ||
+                  placeholder.includes('search') ||
+                  placeholder.includes('find') ||
+                  placeholder.includes('query') ||
                   className.includes('search')
                 ) {
                   if (input.id) return `#${input.id}`;
                   const nameAttr = input.getAttribute('name');
                   if (nameAttr) return `input[name="${nameAttr}"]`;
-                  if (input.getAttribute('placeholder')) return `input[placeholder="${input.getAttribute('placeholder')}"]`;
+                  if (input.getAttribute('placeholder'))
+                    return `input[placeholder="${input.getAttribute('placeholder')}"]`;
                 }
               }
               if (inputs.length > 0) {
@@ -290,7 +318,7 @@ export class GenericSearchStrategy implements ScrapingStrategy {
                 data: {
                   url: config.baseUrl,
                   searchSelector: searchSelector,
-                }
+                },
               })
             );
           }
@@ -298,8 +326,10 @@ export class GenericSearchStrategy implements ScrapingStrategy {
           // Extract cleaned HTML of the search results page
           const cleanedHtml = await page.evaluate(() => {
             const clone = document.body.cloneNode(true) as HTMLElement;
-            const elementsToRemove = clone.querySelectorAll('script, style, noscript, svg, img, iframe, header, footer, nav');
-            elementsToRemove.forEach(el => el.remove());
+            const elementsToRemove = clone.querySelectorAll(
+              'script, style, noscript, svg, img, iframe, header, footer, nav'
+            );
+            elementsToRemove.forEach((el) => el.remove());
             return clone.innerHTML.substring(0, 300000);
           });
 
@@ -345,18 +375,36 @@ export class GenericSearchStrategy implements ScrapingStrategy {
             let result;
             let activeModel = 'gemini-2.5-flash-lite';
             try {
-              console.log(JSON.stringify({ event: 'progress', portalId: config.id, message: `[${keyword}] Trying model: ${activeModel}` }));
+              console.log(
+                JSON.stringify({
+                  event: 'progress',
+                  portalId: config.id,
+                  message: `[${keyword}] Trying model: ${activeModel}`,
+                })
+              );
               const model = genAI.getGenerativeModel({ model: activeModel });
               result = await model.generateContent(prompt);
             } catch (err) {
               activeModel = 'gemini-2.5-flash';
-              console.log(JSON.stringify({ event: 'progress', portalId: config.id, message: `[${keyword}] Model failed. Trying fallback: ${activeModel}` }));
+              console.log(
+                JSON.stringify({
+                  event: 'progress',
+                  portalId: config.id,
+                  message: `[${keyword}] Model failed. Trying fallback: ${activeModel}`,
+                })
+              );
               try {
                 const model = genAI.getGenerativeModel({ model: activeModel });
                 result = await model.generateContent(prompt);
               } catch (err2) {
                 activeModel = 'gemini-1.5-flash';
-                console.log(JSON.stringify({ event: 'progress', portalId: config.id, message: `[${keyword}] Model failed. Trying fallback: ${activeModel}` }));
+                console.log(
+                  JSON.stringify({
+                    event: 'progress',
+                    portalId: config.id,
+                    message: `[${keyword}] Model failed. Trying fallback: ${activeModel}`,
+                  })
+                );
                 const model = genAI.getGenerativeModel({ model: activeModel });
                 result = await model.generateContent(prompt);
               }
@@ -449,7 +497,6 @@ export class GenericSearchStrategy implements ScrapingStrategy {
       }
 
       return uniqueOpportunities;
-
     } catch (error) {
       await browser.close();
       throw error;

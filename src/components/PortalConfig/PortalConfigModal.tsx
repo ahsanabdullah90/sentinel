@@ -98,7 +98,9 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
             </label>
             <input
               value={name}
-              onChange={(e) => { setName(e.target.value); }}
+              onChange={(e) => {
+                setName(e.target.value);
+              }}
               placeholder="e.g. SAM.gov"
               style={{ width: '100%' }}
             />
@@ -116,7 +118,9 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
             </label>
             <input
               value={url}
-              onChange={(e) => { setUrl(e.target.value); }}
+              onChange={(e) => {
+                setUrl(e.target.value);
+              }}
               placeholder="https://..."
               style={{ width: '100%' }}
             />
@@ -134,12 +138,23 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
             </label>
             <input
               value={keywords}
-              onChange={(e) => { setKeywords(e.target.value); }}
+              onChange={(e) => {
+                setKeywords(e.target.value);
+              }}
               placeholder="e.g. AI, Cyber, Cloud"
               style={{ width: '100%' }}
             />
-            <span style={{ display: 'block', marginTop: '6px', fontSize: '0.75rem', color: '#6366f1', lineHeight: '1.4' }}>
-              💡 Separate keywords using commas (e.g. <code>RFP, Media, Cloud</code>). The agent will sequentially hunt for each keyword during search operations.
+            <span
+              style={{
+                display: 'block',
+                marginTop: '6px',
+                fontSize: '0.75rem',
+                color: '#6366f1',
+                lineHeight: '1.4',
+              }}
+            >
+              💡 Separate keywords using commas (e.g. <code>RFP, Media, Cloud</code>). The agent
+              will sequentially hunt for each keyword during search operations.
             </span>
           </div>
           <div

@@ -17,13 +17,20 @@ interface Props {
   onClose: () => void;
   onRefresh: () => void;
   opportunities: Opportunity[];
+  onSelectOpportunity?: (id: string) => void;
 }
 
-export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }: Props) {
+export function OpportunitiesModal({
+  isOpen,
+  onClose,
+  onRefresh,
+  opportunities,
+  onSelectOpportunity,
+}: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const tableContainerRef = useRef<HTMLDivElement>(null);
-  
+
   // Custom scroll states
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollHeight, setScrollHeight] = useState(0);
@@ -53,7 +60,7 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
       const scrollAmount = direction === 'up' ? -180 : 180;
       tableContainerRef.current.scrollBy({
         top: scrollAmount,
-        behavior: 'smooth'
+        behavior: 'smooth',
       });
       // Force trigger scroll handler updating
       setTimeout(handleScroll, 200);
@@ -61,19 +68,22 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
   };
 
   // Status badges count mapping
-  const statusCounts = opportunities.reduce((acc, opp) => {
-    const status = opp.status || 'discovered';
-    acc[status] = (acc[status] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const statusCounts = opportunities.reduce(
+    (acc, opp) => {
+      const status = opp.status || 'discovered';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 
   // Filtered Opportunities
   const filtered = opportunities.filter((opp) => {
-    const matchesSearch = 
+    const matchesSearch =
       opp.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       opp.portal.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (opp.issuing_org || '').toLowerCase().includes(searchQuery.toLowerCase());
-    
+
     if (selectedStatus === 'all') return matchesSearch;
     return matchesSearch && (opp.status || 'discovered') === selectedStatus;
   });
@@ -89,24 +99,9 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
     }
   };
 
-  // Handler to trigger AI Drafting
-  const handleGenerateDraft = async (oppId: string) => {
-    try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('UPDATE opportunities SET status = ? WHERE id = ?', ['drafted', oppId]);
-      onRefresh(); // refresh the view
-      
-      // Optionally trigger backend drafting invoke
-      // await invoke('generate_draft', { rfpId: oppId });
-    } catch (err) {
-      console.error('Failed to start drafting:', err);
-    }
-  };
-
   // Scroll completion progress percentage
-  const scrollPercent = scrollHeight > clientHeight
-    ? Math.round((scrollTop / (scrollHeight - clientHeight)) * 100)
-    : 0;
+  const scrollPercent =
+    scrollHeight > clientHeight ? Math.round((scrollTop / (scrollHeight - clientHeight)) * 100) : 0;
 
   return (
     <div
@@ -161,8 +156,14 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
             cursor: 'pointer',
             transition: 'all 0.2s',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = '#8b90a0'; e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = '#fff';
+            e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = '#8b90a0';
+            e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)';
+          }}
         >
           <X size={16} />
         </button>
@@ -173,21 +174,43 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
           <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600, color: '#fff' }}>
             Discovered Opportunities Center
           </h2>
-          <span style={{ fontSize: '0.8rem', backgroundColor: 'rgba(0,122,255,0.15)', color: 'var(--accent-color)', padding: '2px 8px', borderRadius: '12px', fontWeight: '500' }}>
+          <span
+            style={{
+              fontSize: '0.8rem',
+              backgroundColor: 'rgba(0,122,255,0.15)',
+              color: 'var(--accent-color)',
+              padding: '2px 8px',
+              borderRadius: '12px',
+              fontWeight: '500',
+            }}
+          >
             {opportunities.length} total
           </span>
         </div>
 
         {/* Filter Controls Area */}
-        <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '20px', alignItems: 'center', justifyContent: 'space-between' }}>
-          
+        <div
+          style={{
+            display: 'flex',
+            gap: '15px',
+            flexWrap: 'wrap',
+            marginBottom: '20px',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
           {/* Left: Search input */}
           <div style={{ position: 'relative', flex: '1', minWidth: '280px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '12px', top: '11px', color: '#8b90a0' }} />
+            <Search
+              size={18}
+              style={{ position: 'absolute', left: '12px', top: '11px', color: '#8b90a0' }}
+            />
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); }}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+              }}
               placeholder="Search by title, portal or issuing organization..."
               style={{
                 width: '100%',
@@ -206,17 +229,41 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
 
           {/* Right: Scroll Programmatic Buttons & Indicator */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                gap: '2px',
+              }}
+            >
               <span style={{ fontSize: '0.75rem', color: '#8b90a0' }}>Scroll Gauge</span>
-              <div style={{ width: '80px', height: '4px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{ width: `${scrollPercent}%`, height: '100%', backgroundColor: 'var(--accent-color)', transition: 'width 0.2s' }} />
+              <div
+                style={{
+                  width: '80px',
+                  height: '4px',
+                  backgroundColor: 'rgba(255,255,255,0.05)',
+                  borderRadius: '2px',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${scrollPercent}%`,
+                    height: '100%',
+                    backgroundColor: 'var(--accent-color)',
+                    transition: 'width 0.2s',
+                  }}
+                />
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: '5px' }}>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { scrollTable('up'); }}
+                onClick={() => {
+                  scrollTable('up');
+                }}
                 title="Scroll Table Up"
                 style={{ padding: '8px', borderRadius: '6px' }}
                 disabled={scrollTop <= 0}
@@ -225,7 +272,9 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
               </button>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { scrollTable('down'); }}
+                onClick={() => {
+                  scrollTable('down');
+                }}
                 title="Scroll Table Down"
                 style={{ padding: '8px', borderRadius: '6px' }}
                 disabled={scrollHeight - scrollTop <= clientHeight + 1}
@@ -237,14 +286,26 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
         </div>
 
         {/* Status Tabs Filter */}
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '15px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            overflowX: 'auto',
+            paddingBottom: '10px',
+            marginBottom: '15px',
+            borderBottom: '1px solid rgba(255,255,255,0.05)',
+          }}
+        >
           <button
-            onClick={() => { setSelectedStatus('all'); }}
+            onClick={() => {
+              setSelectedStatus('all');
+            }}
             style={{
               padding: '6px 12px',
               borderRadius: '20px',
               border: 'none',
-              backgroundColor: selectedStatus === 'all' ? 'var(--accent-color)' : 'rgba(255,255,255,0.04)',
+              backgroundColor:
+                selectedStatus === 'all' ? 'var(--accent-color)' : 'rgba(255,255,255,0.04)',
               color: selectedStatus === 'all' ? '#fff' : '#8b90a0',
               cursor: 'pointer',
               fontSize: '0.8rem',
@@ -254,14 +315,16 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
           >
             All <span style={{ opacity: 0.7, marginLeft: '4px' }}>({opportunities.length})</span>
           </button>
-          
+
           {['discovered', 'downloaded', 'ingested', 'drafted', 'submitted'].map((st) => {
             const count = statusCounts[st] || 0;
             const active = selectedStatus === st;
             return (
               <button
                 key={st}
-                onClick={() => { setSelectedStatus(st); }}
+                onClick={() => {
+                  setSelectedStatus(st);
+                }}
                 style={{
                   padding: '6px 12px',
                   borderRadius: '20px',
@@ -296,21 +359,48 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
           className="table-scroll-container"
         >
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-            <thead style={{ position: 'sticky', top: 0, backgroundColor: '#161617', zIndex: 1, boxShadow: '0 1px 0 rgba(255,255,255,0.05)' }}>
+            <thead
+              style={{
+                position: 'sticky',
+                top: 0,
+                backgroundColor: '#161617',
+                zIndex: 1,
+                boxShadow: '0 1px 0 rgba(255,255,255,0.05)',
+              }}
+            >
               <tr>
-                <th style={{ width: '60px', padding: '12px', color: '#8b90a0', fontWeight: 500 }}>S.No.</th>
+                <th style={{ width: '60px', padding: '12px', color: '#8b90a0', fontWeight: 500 }}>
+                  S.No.
+                </th>
                 <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Title</th>
                 <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Issuing Org</th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Portal Source</th>
+                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>
+                  Portal Source
+                </th>
                 <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Deadline</th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500, width: '130px' }}>Status</th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500, width: '160px', textAlign: 'center' }}>Actions</th>
+                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500, width: '130px' }}>
+                  Status
+                </th>
+                <th
+                  style={{
+                    padding: '12px',
+                    color: '#8b90a0',
+                    fontWeight: 500,
+                    width: '160px',
+                    textAlign: 'center',
+                  }}
+                >
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#8b90a0' }}>
+                  <td
+                    colSpan={7}
+                    style={{ textAlign: 'center', padding: '40px', color: '#8b90a0' }}
+                  >
                     No opportunities matching the filters found.
                   </td>
                 </tr>
@@ -324,20 +414,57 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
                         borderBottom: '1px solid rgba(255,255,255,0.04)',
                         transition: 'background-color 0.2s',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
                     >
-                      <td style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>{idx + 1}</td>
-                      <td style={{ padding: '12px', color: '#fff', fontWeight: 500, maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={opp.title}>
+                      <td style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>
+                        {idx + 1}
+                      </td>
+                      <td
+                        style={{
+                          padding: '12px',
+                          color: '#fff',
+                          fontWeight: 500,
+                          maxWidth: '280px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          cursor: onSelectOpportunity ? 'pointer' : 'default',
+                          transition: 'color 0.15s',
+                        }}
+                        title="Click to evaluate opportunity details"
+                        onClick={() => {
+                          if (onSelectOpportunity) {
+                            onSelectOpportunity(opp.id);
+                            onClose();
+                          }
+                        }}
+                        onMouseEnter={(e) => {
+                          if (onSelectOpportunity) {
+                            e.currentTarget.style.color = 'var(--accent-color)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = '#fff';
+                        }}
+                      >
                         {opp.title}
                       </td>
-                      <td style={{ padding: '12px', color: '#8b90a0' }}>{opp.issuing_org || 'N/A'}</td>
+                      <td style={{ padding: '12px', color: '#8b90a0' }}>
+                        {opp.issuing_org || 'N/A'}
+                      </td>
                       <td style={{ padding: '12px', color: '#8b90a0' }}>{opp.portal}</td>
                       <td style={{ padding: '12px', color: '#8b90a0' }}>{opp.date || 'No Date'}</td>
                       <td style={{ padding: '12px' }}>
                         <select
                           value={statusVal}
-                          onChange={(e) => { void handleStatusChange(opp.id, e.target.value); }}
+                          onChange={(e) => {
+                            void handleStatusChange(opp.id, e.target.value);
+                          }}
                           style={{
                             padding: '4px 8px',
                             borderRadius: '6px',
@@ -348,18 +475,32 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
                             cursor: 'pointer',
                           }}
                         >
-                          <option value="discovered" style={{ backgroundColor: '#1c1b1c' }}>Discovered</option>
-                          <option value="downloaded" style={{ backgroundColor: '#1c1b1c' }}>Downloaded</option>
-                          <option value="ingested" style={{ backgroundColor: '#1c1b1c' }}>Ingested</option>
-                          <option value="drafted" style={{ backgroundColor: '#1c1b1c' }}>Drafted</option>
-                          <option value="submitted" style={{ backgroundColor: '#1c1b1c' }}>Submitted</option>
+                          <option value="discovered" style={{ backgroundColor: '#1c1b1c' }}>
+                            Discovered
+                          </option>
+                          <option value="downloaded" style={{ backgroundColor: '#1c1b1c' }}>
+                            Downloaded
+                          </option>
+                          <option value="ingested" style={{ backgroundColor: '#1c1b1c' }}>
+                            Ingested
+                          </option>
+                          <option value="drafted" style={{ backgroundColor: '#1c1b1c' }}>
+                            Drafted
+                          </option>
+                          <option value="submitted" style={{ backgroundColor: '#1c1b1c' }}>
+                            Submitted
+                          </option>
                         </select>
                       </td>
                       <td style={{ padding: '12px', textAlign: 'center' }}>
                         <button
                           className="btn btn-sm btn-ghost"
-                          onClick={() => { void handleGenerateDraft(opp.id); }}
-                          disabled={statusVal === 'drafted'}
+                          onClick={() => {
+                            if (onSelectOpportunity) {
+                              onSelectOpportunity(opp.id);
+                              onClose();
+                            }
+                          }}
                           style={{
                             display: 'inline-flex',
                             gap: '4px',
@@ -368,7 +509,7 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
                           }}
                         >
                           <Sparkles size={12} style={{ color: 'var(--accent-color)' }} />
-                          {statusVal === 'drafted' ? 'Draft Ready' : 'AI Draft'}
+                          Evaluate RFP
                         </button>
                       </td>
                     </tr>
@@ -380,7 +521,16 @@ export function OpportunitiesModal({ isOpen, onClose, onRefresh, opportunities }
         </div>
 
         {/* Footer Area */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', paddingTop: '15px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: '20px',
+            paddingTop: '15px',
+            borderTop: '1px solid rgba(255,255,255,0.05)',
+          }}
+        >
           <span style={{ fontSize: '0.8rem', color: '#8b90a0' }}>
             Showing {filtered.length} of {opportunities.length} opportunities
           </span>

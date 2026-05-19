@@ -38,9 +38,7 @@ async function main() {
       console.log(JSON.stringify({ event: 'portal_detected', data: report }));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      console.log(
-        JSON.stringify({ event: 'error', code: 'detect_failed', message })
-      );
+      console.log(JSON.stringify({ event: 'error', code: 'detect_failed', message }));
     }
   } else if (command === 'hunt') {
     const portalIdx = args.indexOf('--portal');
@@ -52,7 +50,7 @@ async function main() {
 
     const configIdx = args.indexOf('--config');
     let portalConfig: PortalConfig;
-    
+
     if (configIdx !== -1 && configIdx < args.length - 1) {
       const raw = JSON.parse(args[configIdx + 1]);
       portalConfig = {

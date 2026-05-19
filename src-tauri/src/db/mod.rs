@@ -40,6 +40,26 @@ pub fn init() -> Vec<Migration> {
                   ALTER TABLE portals ADD COLUMN rendering_mode TEXT DEFAULT 'Static HTML';
                   ALTER TABLE portals ADD COLUMN cloudflare_bypass_score TEXT DEFAULT 'Low Risk';",
             kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "add_knowledge_base_and_proposal_drafts",
+            sql: "CREATE TABLE IF NOT EXISTS knowledge_base (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    tags TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                  );
+                  CREATE TABLE IF NOT EXISTS proposal_drafts (
+                    id TEXT PRIMARY KEY,
+                    opportunity_id TEXT NOT NULL REFERENCES opportunities(id),
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                  );",
+            kind: MigrationKind::Up,
         }
     ]
 }

@@ -50,9 +50,7 @@ export async function generateDraft(rfpId: string, model: string) {
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(
-      JSON.stringify({ level: 'error', msg: 'Draft generation failed', ctx: message })
-    );
+    console.error(JSON.stringify({ level: 'error', msg: 'Draft generation failed', ctx: message }));
     console.log(
       JSON.stringify({
         event: 'error',

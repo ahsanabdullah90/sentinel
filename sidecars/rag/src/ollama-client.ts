@@ -31,9 +31,7 @@ export class OllamaClient {
       const data = (await response.json()) as unknown;
       const parsed = OllamaTagsResponseSchema.parse(data);
 
-      return parsed.models.some(
-        (m) => m.name === modelName || m.name === `${modelName}:latest`
-      );
+      return parsed.models.some((m) => m.name === modelName || m.name === `${modelName}:latest`);
     } catch {
       return false;
     }

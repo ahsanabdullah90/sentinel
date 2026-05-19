@@ -91,7 +91,10 @@ server.addService(ragProto.rag.RagService.service, {
           'You are an expert proposal assistant.'
         );
 
-        callback(null, { answer, source_documents: JSON.stringify([{ id: 'mock-1', score: 0.9 }]) });
+        callback(null, {
+          answer,
+          source_documents: JSON.stringify([{ id: 'mock-1', score: 0.9 }]),
+        });
       } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
         callback(err);
@@ -101,11 +104,15 @@ server.addService(ragProto.rag.RagService.service, {
 });
 
 const PORT = process.env.PORT ?? 50052;
-server.bindAsync(`0.0.0.0:${String(PORT)}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
-  if (err) {
-    console.error(`Failed to bind server: ${err.message}`);
-    return;
+server.bindAsync(
+  `0.0.0.0:${String(PORT)}`,
+  grpc.ServerCredentials.createInsecure(),
+  (err, port) => {
+    if (err) {
+      console.error(`Failed to bind server: ${err.message}`);
+      return;
+    }
+    console.log(`RAG gRPC server running on port ${String(port)}`);
+    server.start();
   }
-  console.log(`RAG gRPC server running on port ${String(port)}`);
-  server.start();
-});
+);

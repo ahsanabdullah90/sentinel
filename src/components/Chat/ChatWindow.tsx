@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Send, Bot, User, Loader } from 'lucide-react';
+import sentinelKnowledge from './sentinel_knowledge.md?raw';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -33,11 +34,19 @@ export function ChatWindow({ settings }: Props) {
     setLoading(true);
 
     try {
-      // Call mock command or real one if available
-      const response = await invoke('generate_chat_response', { 
-        prompt: input,
+      const systemPrompt = `You are the Sentinel AI Assistant. Refer to the official Sentinel Product Guide below to guide the user on Sentinel's capabilities and limitations. Keep your answers concise, helpful, and technically accurate.
+
+======================================
+SENTINEL PRODUCT GUIDE:
+${sentinelKnowledge}
+======================================`;
+
+      const fullPrompt = `${systemPrompt}\n\nUser Question: ${input}\n\nAssistant Response:`;
+
+      const response = await invoke('generate_chat_response', {
+        prompt: fullPrompt,
         model: settings.ollamaModel,
-        url: settings.ollamaUrl
+        url: settings.ollamaUrl,
       });
       setMessages((prev) => [...prev, { role: 'assistant', content: response as string }]);
     } catch (error) {
@@ -110,13 +119,25 @@ export function ChatWindow({ settings }: Props) {
       <div className="input-group" style={{ display: 'flex', gap: '10px' }}>
         <input
           value={input}
-          onChange={(e) => { setInput(e.target.value); }}
+          onChange={(e) => {
+            setInput(e.target.value);
+          }}
           placeholder="Ask a question..."
-          onKeyPress={(e) => { if (e.key === 'Enter') { void handleSend(); } }}
+          onKeyPress={(e) => {
+            if (e.key === 'Enter') {
+              void handleSend();
+            }
+          }}
           style={{ flex: 1 }}
           disabled={loading}
         />
-        <button className="btn btn-primary" onClick={() => { void handleSend(); }} disabled={loading}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            void handleSend();
+          }}
+          disabled={loading}
+        >
           <Send size={16} />
         </button>
       </div>

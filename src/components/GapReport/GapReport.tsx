@@ -32,12 +32,20 @@ export function GapReport() {
       <div className="input-group" style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
         <input
           value={rfpId}
-          onChange={(e) => { setRfpId(e.target.value); }}
+          onChange={(e) => {
+            setRfpId(e.target.value);
+          }}
           placeholder="Enter RFP ID (e.g. RFP-2026-001)"
           style={{ flex: 1 }}
           disabled={loading}
         />
-        <button className="btn btn-primary" onClick={() => { void handleAnalyze(); }} disabled={loading}>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            void handleAnalyze();
+          }}
+          disabled={loading}
+        >
           <Search size={16} /> {loading ? 'Analyzing...' : 'Analyze'}
         </button>
       </div>

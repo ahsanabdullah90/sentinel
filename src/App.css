@@ -461,20 +461,20 @@ th {
   right: 0;
   bottom: 0;
   background-color: rgba(255, 255, 255, 0.1);
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .slider:before {
   position: absolute;
-  content: "";
+  content: '';
   height: 14px;
   width: 14px;
   left: 2px;
   bottom: 2px;
   background-color: #8b90a0;
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 50%;
 }
 
