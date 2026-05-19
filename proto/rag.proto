@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package rag;
+
+// Simple request to ingest a document
+message IngestRequest {
+  string document_id = 1;
+  string content = 2;
+}
+
+message IngestResponse {
+  string status = 1; // e.g., "ok"
+}
+
+// Query request to the RAG engine
+message QueryRequest {
+  string query = 1;
+}
+
+message QueryResponse {
+  string answer = 1;
+  string source_documents = 2; // JSON array string
+}
+
+service RagService {
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+  rpc Query(QueryRequest) returns (QueryResponse);
+}

@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package hunter;
+
+// Request to detect a portal URL
+message DetectRequest {
+  string url = 1;
+}
+
+// Response emitted when a portal is detected
+message DetectResponse {
+  string event = 1; // "portal_detected"
+  string json_payload = 2; // JSON string of report
+}
+
+// Request to start a hunt on a portal
+message HuntRequest {
+  string portal_id = 1;
+  string mock_config_json = 2; // JSON of PortalConfig (mocked for now)
+}
+
+// Response for hunt progress / completion
+message HuntResponse {
+  string event = 1; // e.g., "hunt_complete", "error"
+  string json_payload = 2;
+}
+
+service HunterService {
+  rpc Detect(DetectRequest) returns (stream DetectResponse);
+  rpc Hunt(HuntRequest) returns (stream HuntResponse);
+}

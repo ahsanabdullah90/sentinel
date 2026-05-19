@@ -1,0 +1,8 @@
+# Rust linting configuration for Sentinel
+# See: https://doc.rust-lang.org/clippy/
+
+# Warn on all clippy lints by default
+allow-expect-in-tests = false
+allow-unwrap-in-tests = false
+too-many-arguments-threshold = 7
+single-char-binding-name-threshold = 4

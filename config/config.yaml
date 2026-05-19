@@ -1,0 +1,4 @@
+port: 50051
+chroma_url: 'http://localhost:8000'
+ollama_url: 'http://localhost:11434'
+database_url: 'sqlite:sentinel.db'

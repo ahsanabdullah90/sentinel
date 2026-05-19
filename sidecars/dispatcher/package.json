@@ -1,0 +1,14 @@
+{
+  "name": "dispatcher",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.2"
+  }
+}

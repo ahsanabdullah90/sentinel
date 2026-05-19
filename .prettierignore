@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+coverage/
+target/
+src-tauri/target/
+.git/
+.vscode/
+*.lock

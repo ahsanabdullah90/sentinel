@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - '8000:8000'
+    volumes:
+      - chroma_data:/chroma/chroma
+
+  redis:
+    image: redis:latest
+    ports:
+      - '6379:6379'
+
+  hunter:
+    build:
+      context: .
+      dockerfile: sidecars/hunter/Dockerfile
+    ports:
+      - '50051:50051'
+    environment:
+      - PORT=50051
+    depends_on:
+      - ollama
+
+  rag:
+    build:
+      context: .
+      dockerfile: sidecars/rag/Dockerfile
+    ports:
+      - '50052:50051'
+    environment:
+      - PORT=50051
+      - CHROMA_URL=http://chromadb:8000
+      - OLLAMA_URL=http://ollama:11434
+    depends_on:
+      - chromadb
+      - ollama
+
+volumes:
+  ollama_data:
+  chroma_data:
