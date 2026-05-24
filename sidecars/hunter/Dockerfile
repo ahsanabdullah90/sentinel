@@ -1,33 +1,29 @@
-FROM node:20-alpine AS builder
+FROM python:3.11-slim
+
+# Install system dependencies for Playwright and Chromium
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy package.json of the sidecar from the root context
-COPY sidecars/hunter/package.json sidecars/hunter/package-lock.json* ./sidecars/hunter/
+# Install python packages directly
+RUN pip install --no-cache-dir \
+    grpcio==1.62.2 \
+    grpcio-tools==1.62.2 \
+    protobuf>=5.26.1,<6.0.0dev \
+    playwright \
+    google-generativeai \
+    redis
 
-# Install dependencies in the sidecar directory
-WORKDIR /app/sidecars/hunter
-RUN npm install --legacy-peer-deps
+# Install Playwright browsers and system dependencies
+RUN playwright install chromium --with-deps
 
-# Go back to root to copy source files and shared proto
-WORKDIR /app
-COPY sidecars/hunter ./sidecars/hunter
+# Copy source code and compiled proto
+COPY sidecars/hunter/src_py ./sidecars/hunter/src_py
 COPY proto ./proto
 
-# Build the sidecar
-WORKDIR /app/sidecars/hunter
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine
-WORKDIR /app
-
-# Mirror the directory structure so relative paths work!
-COPY --from=builder /app/sidecars/hunter/dist ./sidecars/hunter/dist
-COPY --from=builder /app/sidecars/hunter/node_modules ./sidecars/hunter/node_modules
-COPY --from=builder /app/sidecars/hunter/package.json ./sidecars/hunter/
-COPY --from=builder /app/proto ./proto
-
-ENV NODE_ENV=production
+ENV PORT=50051
 EXPOSE 50051
-# Run from the mirrored directory
-CMD ["node", "sidecars/hunter/dist/server.js"]
+
+CMD ["python", "-m", "sidecars.hunter.src_py.server"]

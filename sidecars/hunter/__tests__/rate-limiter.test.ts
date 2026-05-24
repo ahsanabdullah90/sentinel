@@ -56,11 +56,11 @@ describe('TokenBucketRateLimiter', () => {
     let acquired = false;
     const acquirePromise = limiter.acquire().then(() => (acquired = true));
 
-    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(acquired).toBe(false);
 
-    vi.advanceTimersByTime(20000); // 30s total
-    vi.advanceTimersByTime(8000); // jitter
+    await vi.advanceTimersByTimeAsync(20000); // 30s total
+    await vi.advanceTimersByTimeAsync(8000); // jitter
 
     await acquirePromise;
     expect(acquired).toBe(true);

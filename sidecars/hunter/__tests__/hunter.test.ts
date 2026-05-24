@@ -14,7 +14,9 @@ describe('PortalRunner', () => {
       activeWindowEnd: '23:59',
       requestsPerMinute: 15,
     };
+    process.env.SENTINEL_DEV_BYPASS_RATE_LIMIT = 'true';
     const runner = new PortalRunner();
     await expect(runner.runPortal(mockConfig)).resolves.not.toThrow();
+    process.env.SENTINEL_DEV_BYPASS_RATE_LIMIT = 'false';
   });
 });

@@ -1,33 +1,18 @@
-FROM node:20-alpine AS builder
+FROM python:3.11-slim
+
 WORKDIR /app
 
-# Copy package.json of the sidecar from the root context
-COPY sidecars/rag/package.json sidecars/rag/package-lock.json* ./sidecars/rag/
+# Install dependencies
+RUN pip install --no-cache-dir \
+    grpcio==1.62.2 \
+    grpcio-tools==1.62.2 \
+    protobuf>=5.26.1,<6.0.0dev
 
-# Install dependencies in the sidecar directory
-WORKDIR /app/sidecars/rag
-RUN npm install --legacy-peer-deps
-
-# Go back to root to copy source files and shared proto
-WORKDIR /app
-COPY sidecars/rag ./sidecars/rag
+# Copy source code and proto
+COPY sidecars/rag/src_py ./sidecars/rag/src_py
 COPY proto ./proto
 
-# Build the sidecar
-WORKDIR /app/sidecars/rag
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine
-WORKDIR /app
-
-# Mirror the directory structure so relative paths work!
-COPY --from=builder /app/sidecars/rag/dist ./sidecars/rag/dist
-COPY --from=builder /app/sidecars/rag/node_modules ./sidecars/rag/node_modules
-COPY --from=builder /app/sidecars/rag/package.json ./sidecars/rag/
-COPY --from=builder /app/proto ./proto
-
-ENV NODE_ENV=production
+ENV PORT=50052
 EXPOSE 50052
-# Run from the mirrored directory
-CMD ["node", "sidecars/rag/dist/server.js"]
+
+CMD ["python", "-m", "sidecars.rag.src_py.server"]
