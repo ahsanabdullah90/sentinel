@@ -1,26 +1,38 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Cpu, Cloud, Key } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (settings: { ollamaModel: string; ollamaUrl: string }) => void;
-  currentSettings: { ollamaModel: string; ollamaUrl: string };
+  onSave: (settings: any) => void;
+  currentSettings: any;
 }
 
 export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Props) {
   const [ollamaModel, setOllamaModel] = useState('phi3');
   const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
+  const [processingMode, setProcessingMode] = useState<'local' | 'cloud'>('local');
+  const [cloudProvider, setCloudProvider] = useState<'gemini' | 'claude' | 'deepseek'>('gemini');
+  const [apiKey, setApiKey] = useState('');
 
   useEffect(() => {
     if (currentSettings) {
-      setOllamaModel(currentSettings.ollamaModel);
-      setOllamaUrl(currentSettings.ollamaUrl);
+      setOllamaModel(currentSettings.ollamaModel || 'phi3');
+      setOllamaUrl(currentSettings.ollamaUrl || 'http://127.0.0.1:11434');
+      setProcessingMode(currentSettings.processingMode || 'local');
+      setCloudProvider(currentSettings.cloudProvider || 'gemini');
+      setApiKey(currentSettings.apiKey || '');
     }
   }, [currentSettings, isOpen]);
 
   const handleSave = () => {
-    onSave({ ollamaModel, ollamaUrl });
+    onSave({
+      ollamaModel,
+      ollamaUrl,
+      processingMode,
+      cloudProvider,
+      apiKey
+    });
     onClose();
   };
 
@@ -44,12 +56,14 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
       <div
         className="modal-content card glass"
         style={{
-          width: '400px',
-          padding: '20px',
+          width: '450px',
+          padding: '25px',
           position: 'relative',
           backgroundColor: '#1e1e1e',
           color: '#fff',
           fontFamily: 'Inter, sans-serif',
+          maxHeight: '90vh',
+          overflowY: 'auto'
         }}
       >
         <button
@@ -66,70 +80,155 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
         >
           <X size={18} />
         </button>
-        <h3 style={{ marginTop: 0 }}>System Settings</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px' }}>
+        <h3 style={{ marginTop: 0, marginBottom: '20px' }}>System Settings</h3>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Processing Mode Toggle */}
           <div>
-            <label
-              style={{
-                display: 'block',
-                marginBottom: '5px',
-                fontSize: '0.85rem',
-                color: '#8b90a0',
-              }}
-            >
-              Ollama Model Name
+            <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.85rem', color: '#8b90a0' }}>
+              Processing Mode
             </label>
-            <input
-              value={ollamaModel}
-              onChange={(e) => setOllamaModel(e.target.value)}
-              placeholder="e.g. phi3, llama3"
-              style={{
-                width: '100%',
-                padding: '8px',
-                borderRadius: '4px',
-                border: '1px solid #333',
-                backgroundColor: '#2a2a2a',
-                color: '#fff',
-                boxSizing: 'border-box',
-              }}
-            />
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => setProcessingMode('local')}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  borderRadius: '6px',
+                  border: '1px solid ' + (processingMode === 'local' ? 'var(--accent-color)' : '#333'),
+                  backgroundColor: processingMode === 'local' ? 'rgba(0,122,255,0.1)' : '#2a2a2a',
+                  color: processingMode === 'local' ? 'var(--accent-color)' : '#8b90a0',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: 600
+                }}
+              >
+                <Cpu size={16} /> Local (Privacy)
+              </button>
+              <button
+                onClick={() => setProcessingMode('cloud')}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  borderRadius: '6px',
+                  border: '1px solid ' + (processingMode === 'cloud' ? 'var(--accent-color)' : '#333'),
+                  backgroundColor: processingMode === 'cloud' ? 'rgba(0,122,255,0.1)' : '#2a2a2a',
+                  color: processingMode === 'cloud' ? 'var(--accent-color)' : '#8b90a0',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  fontWeight: 600
+                }}
+              >
+                <Cloud size={16} /> Cloud (Power)
+              </button>
+            </div>
           </div>
-          <div>
-            <label
-              style={{
-                display: 'block',
-                marginBottom: '5px',
-                fontSize: '0.85rem',
-                color: '#8b90a0',
-              }}
-            >
-              Ollama API URL
-            </label>
-            <input
-              value={ollamaUrl}
-              onChange={(e) => setOllamaUrl(e.target.value)}
-              placeholder="e.g. http://127.0.0.1:11434"
-              style={{
-                width: '100%',
-                padding: '8px',
-                borderRadius: '4px',
-                border: '1px solid #333',
-                backgroundColor: '#2a2a2a',
-                color: '#fff',
-                boxSizing: 'border-box',
-              }}
-            />
-          </div>
-          <div
-            style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}
-          >
-            <button className="btn btn-secondary" onClick={onClose} style={{ padding: '8px 15px' }}>
+
+          {processingMode === 'local' ? (
+            <>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.85rem', color: '#8b90a0' }}>
+                  Ollama Model Name
+                </label>
+                <input
+                  value={ollamaModel}
+                  onChange={(e) => setOllamaModel(e.target.value)}
+                  placeholder="e.g. phi3, llama3"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.85rem', color: '#8b90a0' }}>
+                  Ollama API URL
+                </label>
+                <input
+                  value={ollamaUrl}
+                  onChange={(e) => setOllamaUrl(e.target.value)}
+                  placeholder="e.g. http://127.0.0.1:11434"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.85rem', color: '#8b90a0' }}>
+                  Cloud Provider
+                </label>
+                <select
+                  value={cloudProvider}
+                  onChange={(e) => setCloudProvider(e.target.value as any)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <option value="gemini">Google Gemini</option>
+                  <option value="claude">Anthropic Claude</option>
+                  <option value="deepseek">DeepSeek</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.85rem', color: '#8b90a0' }}>
+                  API Key
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Enter your API key"
+                    style={{
+                      width: '100%',
+                      padding: '10px 10px 10px 35px',
+                      borderRadius: '4px',
+                      border: '1px solid #333',
+                      backgroundColor: '#2a2a2a',
+                      color: '#fff',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <Key size={16} style={{ position: 'absolute', left: '10px', top: '12px', color: '#8b90a0' }} />
+                </div>
+              </div>
+            </>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+            <button className="btn btn-secondary" onClick={onClose} style={{ padding: '10px 20px' }}>
               Cancel
             </button>
             <button
               className="btn btn-primary"
               onClick={handleSave}
-              style={{ padding: '8px 15px' }}
+              style={{ padding: '10px 20px' }}
             >
               Save Settings
             </button>

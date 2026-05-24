@@ -15,12 +15,10 @@ describe('TokenBucketRateLimiter', () => {
     const limiter = new TokenBucketRateLimiter(5, 15, 60000);
     let acquired = false;
 
-    // Acquire without waiting for timers should pass if we don't count jitter
-    // We can mock getJitter or just advance timers slightly
     const acquirePromise = limiter.acquire().then(() => (acquired = true));
 
     // Jitter is between 2000-8000ms
-    vi.advanceTimersByTime(8000);
+    await vi.advanceTimersByTimeAsync(8000);
     await acquirePromise;
 
     expect(acquired).toBe(true);
@@ -34,16 +32,18 @@ describe('TokenBucketRateLimiter', () => {
     const acquire2 = limiter.acquire().then(() => acquiredCount++);
     const acquire3 = limiter.acquire().then(() => acquiredCount++);
 
-    vi.advanceTimersByTime(8000); // clear jitter
+    await vi.advanceTimersByTimeAsync(8000); // clear jitter
     await Promise.all([acquire1, acquire2]);
     expect(acquiredCount).toBe(2);
 
     // third should still be waiting
-    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(10000);
     expect(acquiredCount).toBe(2);
 
     // after 60s, it refills 1 token
-    vi.advanceTimersByTime(60000);
+    await vi.advanceTimersByTimeAsync(60000);
+    // Extra time for jitter of the 3rd request
+    await vi.advanceTimersByTimeAsync(8000);
     await acquire3;
     expect(acquiredCount).toBe(3);
   });
@@ -56,11 +56,11 @@ describe('TokenBucketRateLimiter', () => {
     let acquired = false;
     const acquirePromise = limiter.acquire().then(() => (acquired = true));
 
-    vi.advanceTimersByTime(10000);
+    await vi.advanceTimersByTimeAsync(20000);
     expect(acquired).toBe(false);
 
-    vi.advanceTimersByTime(20000); // 30s total
-    vi.advanceTimersByTime(8000); // jitter
+    await vi.advanceTimersByTimeAsync(10000); // 30s total
+    await vi.advanceTimersByTimeAsync(8000); // jitter
 
     await acquirePromise;
     expect(acquired).toBe(true);
@@ -74,11 +74,11 @@ describe('TokenBucketRateLimiter', () => {
     let acquired = false;
     const acquirePromise = limiter.acquire().then(() => (acquired = true));
 
-    vi.advanceTimersByTime(100000); // Lots of time
+    await vi.advanceTimersByTimeAsync(100000); // Lots of time
     expect(acquired).toBe(false); // Still paused
 
     limiter.resume();
-    vi.advanceTimersByTime(8000); // Jitter
+    await vi.advanceTimersByTimeAsync(8000); // Jitter
 
     await acquirePromise;
     expect(acquired).toBe(true);

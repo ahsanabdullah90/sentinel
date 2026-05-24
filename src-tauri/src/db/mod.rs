@@ -60,6 +60,19 @@ pub fn init() -> Vec<Migration> {
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
                   );",
             kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "add_encrypted_credentials",
+            sql: "CREATE TABLE IF NOT EXISTS encrypted_credentials (
+                    id TEXT PRIMARY KEY,
+                    portal_id TEXT NOT NULL REFERENCES portals(id),
+                    username TEXT,
+                    encrypted_password TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(portal_id)
+                  );",
+            kind: MigrationKind::Up,
         }
     ]
 }

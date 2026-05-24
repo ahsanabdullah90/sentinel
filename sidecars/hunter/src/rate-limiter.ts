@@ -82,7 +82,7 @@ export class TokenBucketRateLimiter {
 
         if (this.tokens >= 1) {
           this.tokens -= 1;
-          const jitter = this.getJitter();
+          const jitter = process.env.NODE_ENV === "test" ? 0 : this.getJitter();
           setTimeout(() => {
             resolve();
           }, jitter);

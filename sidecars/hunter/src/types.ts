@@ -2,13 +2,18 @@ export interface PortalConfig {
   id: string;
   name: string;
   baseUrl: string;
-  authMethod: 'public' | 'login' | 'mfa';
+  authMethod: 'public' | 'login' | 'mfa' | 'api_key' | 'credential' | 'oauth';
   scraperModule: string;
   activeWindowStart: string;
   activeWindowEnd: string;
   requestsPerMinute: number;
   keywords?: string;
-  selectorConfig?: string; // JSON string of selectors
+  selectorConfig?: string;
+  credentials?: {
+    username?: string;
+    password?: string;
+    apiKey?: string;
+  };
 }
 
 export interface RFPOpportunity {

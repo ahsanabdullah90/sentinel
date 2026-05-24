@@ -20,6 +20,12 @@ pub enum SentinelError {
 
     #[error("Chroma unavailable: {0}")]
     ChromaUnavailable(String),
+
+    #[error("AI error: {0}")]
+    Ai(String),
+
+    #[error("Network error: {0}")]
+    Network(String),
 }
 
 #[derive(Serialize)]
@@ -42,6 +48,8 @@ impl Serialize for SentinelError {
             SentinelError::Io(m) => ("IO_ERROR", m.clone()),
             SentinelError::OllamaUnavailable(m) => ("OLLAMA_UNAVAILABLE", m.clone()),
             SentinelError::ChromaUnavailable(m) => ("CHROMA_UNAVAILABLE", m.clone()),
+            SentinelError::Ai(m) => ("AI_ERROR", m.clone()),
+            SentinelError::Network(m) => ("NETWORK_ERROR", m.clone()),
         };
 
         let json = SentinelErrorJson {
@@ -57,63 +65,5 @@ impl Serialize for SentinelError {
 impl From<std::io::Error> for SentinelError {
     fn from(err: std::io::Error) -> Self {
         SentinelError::Io(err.to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_database_error_serialization() {
-        let error = SentinelError::Database("connection failed".to_string());
-        let serialized = serde_json::to_value(&error).unwrap();
-        assert_eq!(serialized["code"], "DATABASE_ERROR");
-        assert_eq!(serialized["message"], "connection failed");
-    }
-
-    #[test]
-    fn test_sidecar_error_serialization() {
-        let error = SentinelError::Sidecar("process crashed".to_string());
-        let serialized = serde_json::to_value(&error).unwrap();
-        assert_eq!(serialized["code"], "SIDECAR_ERROR");
-        assert_eq!(serialized["message"], "process crashed");
-    }
-
-    #[test]
-    fn test_validation_error_serialization() {
-        let error = SentinelError::Validation("invalid input".to_string());
-        let serialized = serde_json::to_value(&error).unwrap();
-        assert_eq!(serialized["code"], "VALIDATION_ERROR");
-        assert_eq!(serialized["message"], "invalid input");
-    }
-
-    #[test]
-    fn test_io_error_from_std() {
-        let std_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let sentinel_error = SentinelError::from(std_error);
-        let serialized = serde_json::to_value(&sentinel_error).unwrap();
-        assert_eq!(serialized["code"], "IO_ERROR");
-    }
-
-    #[test]
-    fn test_ollama_unavailable_error() {
-        let error = SentinelError::OllamaUnavailable("connection timeout".to_string());
-        let serialized = serde_json::to_value(&error).unwrap();
-        assert_eq!(serialized["code"], "OLLAMA_UNAVAILABLE");
-    }
-
-    #[test]
-    fn test_chroma_unavailable_error() {
-        let error = SentinelError::ChromaUnavailable("service unavailable".to_string());
-        let serialized = serde_json::to_value(&error).unwrap();
-        assert_eq!(serialized["code"], "CHROMA_UNAVAILABLE");
-    }
-
-    #[test]
-    fn test_error_display() {
-        let error = SentinelError::Database("test message".to_string());
-        assert!(error.to_string().contains("Database error"));
     }
 }

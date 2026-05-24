@@ -37,3 +37,15 @@ pub async fn get_opportunities(_app: AppHandle, _portal_id: Option<String>, _sta
     // Will be implemented properly when connecting to SQLite
     Ok(vec![])
 }
+
+#[tauri::command]
+pub async fn run_gap_analysis(app: AppHandle, rfp_text: String, mode: String, model: String, url: String) -> Result<(), SentinelError> {
+    spawn_sidecar(app, "gap-engine", vec![
+        "analyze".to_string(),
+        "--rfp-text".to_string(), rfp_text,
+        "--mode".to_string(), mode,
+        "--model".to_string(), model,
+        "--url".to_string(), url
+    ]).await?;
+    Ok(())
+}

@@ -22,24 +22,28 @@ services:
 
   hunter:
     build:
-      context: .
-      dockerfile: sidecars/hunter/Dockerfile
+      context: sidecars/hunter_py
+      dockerfile: Dockerfile
     ports:
       - '50051:50051'
     environment:
       - PORT=50051
+      - REDIS_URL=redis://redis:6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
+      - redis
       - ollama
 
   rag:
     build:
-      context: .
-      dockerfile: sidecars/rag/Dockerfile
+      context: sidecars/rag_py
+      dockerfile: Dockerfile
     ports:
-      - '50052:50051'
+      - '50052:50052'
     environment:
-      - PORT=50051
-      - CHROMA_URL=http://chromadb:8000
+      - PORT=50052
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
       - OLLAMA_URL=http://ollama:11434
     depends_on:
       - chromadb
