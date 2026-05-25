@@ -1,7 +1,7 @@
 {
   "name": "temp_app",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -44,7 +44,7 @@
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vitejs/plugin-react": "^4.6.0",
-    "@vitest/coverage-v8": "^1.0.0",
+    "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-react": "^7.34.0",
@@ -54,7 +54,7 @@
     "prettier": "^3.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "vitest": "^1.6.1"
+    "vitest": "^4.1.7"
   },
   "engines": {
     "node": ">=20"

@@ -101,7 +101,7 @@ body {
 /* Main Content */
 .main-content {
   flex: 1;
-  padding: 30px;
+  padding: 20px;
   overflow-y: auto;
   background-color: var(--bg-color);
 }
@@ -110,7 +110,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 15px;
 }
 
 .header h1 {

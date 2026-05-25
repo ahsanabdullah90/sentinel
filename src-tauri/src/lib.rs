@@ -11,14 +11,17 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-async fn check_ollama_status() -> String {
-    use std::net::TcpStream;
-    use std::time::Duration;
-    
-    // Try to connect to Ollama default port
-    match TcpStream::connect_timeout(&"127.0.0.1:11434".parse().unwrap(), Duration::from_secs(1)) {
-        Ok(_) => "Online".to_string(),
-        Err(_) => "Offline".to_string(),
+async fn check_ollama_status(url: String) -> String {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build() {
+            Ok(c) => c,
+            Err(_) => return "Offline".to_string(),
+        };
+
+    match client.get(&format!("{}/api/tags", url)).send().await {
+        Ok(res) if res.status().is_success() => "Online".to_string(),
+        _ => "Offline".to_string(),
     }
 }
 
@@ -44,6 +47,37 @@ async fn generate_chat_response(prompt: String, model: String, url: String) -> R
     }
     
     Err("Failed to get response from Ollama".to_string())
+}
+
+#[tauri::command]
+async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let res = client.get(&format!("{}/api/tags", url))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    
+    let mut models = Vec::new();
+    if let Some(models_array) = json.get("models") {
+        if let Some(arr) = models_array.as_array() {
+            for item in arr {
+                if let Some(name) = item.get("name") {
+                    if let Some(name_str) = name.as_str() {
+                        models.push(name_str.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    models.sort();
+    Ok(models)
 }
 
 #[tauri::command]
@@ -84,6 +118,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             check_ollama_status,
+            get_ollama_models,
             generate_chat_response,
             analyze_gaps,
             bootstrap_system,

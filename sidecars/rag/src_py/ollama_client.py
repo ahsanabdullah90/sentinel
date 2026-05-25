@@ -1,3 +1,13 @@
+"""Ollama Client Module
+
+Provides an async HTTP wrapper around the Ollama REST API for model
+health-checks, model availability queries, and text generation.
+
+The client reads ``OLLAMA_URL`` from the environment (default
+``http://localhost:11434``).
+"""
+
+import asyncio
 import os
 import json
 import logging
@@ -6,14 +16,16 @@ import urllib.error
 
 logger = logging.getLogger("rag.ollama_client")
 
+
 class OllamaClient:
+    """Lightweight async Ollama client using ``urllib``."""
+
     def __init__(self):
-        # Read from environment variable passed by Docker-compose, fallback to localhost
         self.base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
         logger.info(f"Initialized OllamaClient pointing to: {self.base_url}")
 
     async def check_health(self) -> bool:
-        import asyncio
+        """Return ``True`` if the Ollama tags endpoint is reachable."""
         def run_health():
             try:
                 url = f"{self.base_url}/api/tags"
@@ -25,7 +37,7 @@ class OllamaClient:
         return await asyncio.get_running_loop().run_in_executor(None, run_health)
 
     async def is_model_pulled(self, model_name: str) -> bool:
-        import asyncio
+        """Check whether *model_name* is available locally in Ollama."""
         def run_tags():
             try:
                 url = f"{self.base_url}/api/tags"
@@ -33,7 +45,10 @@ class OllamaClient:
                     if response.status == 200:
                         data = json.loads(response.read().decode("utf-8"))
                         models = data.get("models", [])
-                        return any(m.get("name") == model_name or m.get("name") == f"{model_name}:latest" for m in models)
+                        return any(
+                            m.get("name") == model_name or m.get("name") == f"{model_name}:latest"
+                            for m in models
+                        )
             except Exception:
                 return False
             return False
@@ -41,7 +56,19 @@ class OllamaClient:
         return await asyncio.get_running_loop().run_in_executor(None, run_tags)
 
     async def generate(self, model: str, prompt: str, system_context: str = None) -> str:
-        import asyncio
+        """Generate a text completion using *model*.
+
+        Args:
+            model: Ollama model tag (e.g. ``llama3.1:8b``).
+            prompt: User prompt.
+            system_context: Optional system instruction.
+
+        Returns:
+            The generated response text.
+
+        Raises:
+            RuntimeError: If the Ollama API returns an error.
+        """
         def run_generate():
             url = f"{self.base_url}/api/generate"
             payload = {

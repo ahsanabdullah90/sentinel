@@ -1,3 +1,12 @@
+"""Portal Runner Module
+
+Coordinates the execution of portal scraping configurations.  Manages
+per-portal ``TokenBucketRateLimiter`` instances and delegates to the
+appropriate ``ScrapingStrategy`` returned by ``get_strategy``.
+
+Each discovered opportunity is emitted as a JSON-line event on stdout.
+"""
+
 import json
 import logging
 from typing import Dict, Any
@@ -6,18 +15,34 @@ from .scraper_engine import get_strategy
 
 logger = logging.getLogger("hunter.portal_runner")
 
+
 class PortalRunner:
+    """Runs one or more portal configurations through the scraping pipeline.
+
+    Attributes:
+        active_portals: Map of portal ID → rate limiter instance.
+    """
+
     def __init__(self):
         self.active_portals: Dict[str, TokenBucketRateLimiter] = {}
 
     async def run_portal(self, config: Dict[str, Any]) -> None:
+        """Execute a full scrape for *config*.
+
+        Args:
+            config: Portal configuration dict containing at minimum
+                ``id``, ``name``, ``baseUrl``, ``scraperModule``, and
+                ``requestsPerMinute``.
+
+        Raises:
+            ValueError: If ``config`` is missing the ``id`` key.
+        """
         portal_id = config.get("id")
         if not portal_id:
             raise ValueError("Portal config is missing 'id'")
 
         if portal_id not in self.active_portals:
             rpm = config.get("requestsPerMinute", 15)
-            # Create standard rate limiter with cap = min(5, rpm) and rate = rpm
             capacity = min(5, rpm)
             self.active_portals[portal_id] = TokenBucketRateLimiter(
                 capacity=capacity,

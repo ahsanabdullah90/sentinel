@@ -277,8 +277,17 @@ function App() {
   async function checkOllama() {
     setOllamaStatus('Checking...');
     try {
-      const status = await invoke('check_ollama_status');
+      const status = await invoke('check_ollama_status', { url: settings.ollamaUrl });
       setOllamaStatus(status as string);
+      if (status === 'Online') {
+        const modelList = await invoke<string[]>('get_ollama_models', { url: settings.ollamaUrl });
+        if (modelList.length > 0) {
+          setSettings(prev => ({
+            ...prev,
+            ollamaModel: modelList.includes(prev.ollamaModel) ? prev.ollamaModel : modelList[0]
+          }));
+        }
+      }
     } catch (error) {
       console.error('Failed to check Ollama:', error);
       setOllamaStatus('Offline');

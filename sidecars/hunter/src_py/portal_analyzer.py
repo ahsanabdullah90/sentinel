@@ -1,9 +1,20 @@
+"""Portal Analyzer Module
+
+Provides the `analyze_portal` asynchronous function which uses Playwright to load a portal URL,
+extracts a search selector either via Gemini AI or heuristic methods, and returns a structured
+report describing portal capabilities.
+
+The function streams progress events as JSON lines to stdout for downstream consumption.
+"""
+
 import os
 import json
 import logging
 from playwright.async_api import async_playwright
 import google.generativeai as genai
 from .scraper_engine import extract_json
+
+
 
 logger = logging.getLogger("hunter.portal_analyzer")
 

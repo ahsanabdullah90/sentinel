@@ -1,3 +1,17 @@
+"""Rate Limiter Module
+
+Implements a token-bucket rate limiter with secure jitter, exponential
+back-off, and CAPTCHA pause support.
+
+Attributes:
+    capacity: Maximum number of tokens in the bucket (default 5).
+    refill_rate: Tokens added per interval (default 15 per minute).
+    refill_interval_ms: Interval in milliseconds (default 60000).
+
+Used by the Hunter sidecar to throttle requests to external portals and
+avoid triggering anti-bot protections.
+"""
+
 import asyncio
 import time
 import os
@@ -7,7 +21,16 @@ from typing import List, Callable
 
 logger = logging.getLogger("hunter.rate_limiter")
 
+
 class TokenBucketRateLimiter:
+    """Async token-bucket rate limiter with jitter and back-off.
+
+    Args:
+        capacity: Max burst size.
+        refill_rate: Tokens restored per refill interval.
+        refill_interval_ms: Refill window in milliseconds.
+    """
+
     def __init__(self, capacity: int = 5, refill_rate: int = 15, refill_interval_ms: int = 60000):
         self.capacity = capacity
         self.tokens = float(capacity)
@@ -22,6 +45,7 @@ class TokenBucketRateLimiter:
         self._lock = asyncio.Lock()
 
     def _refill(self):
+        """Refill tokens based on elapsed time since last refill."""
         now = time.time()
         elapsed_time_ms = (now - self.last_refill) * 1000.0
 
@@ -31,7 +55,15 @@ class TokenBucketRateLimiter:
             self.last_refill = now - ((elapsed_time_ms % self.refill_interval_ms) / 1000.0)
 
     def _get_jitter(self, min_ms: int = 2000, max_ms: int = 8000) -> float:
-        # Secure random jitter using os.urandom per safety guidelines
+        """Return a cryptographically-seeded random delay in seconds.
+
+        Args:
+            min_ms: Minimum jitter in milliseconds.
+            max_ms: Maximum jitter in milliseconds.
+
+        Returns:
+            Jitter delay in seconds.
+        """
         range_ms = max_ms - min_ms
         random_bytes = os.urandom(4)
         random_num = int.from_bytes(random_bytes, byteorder="little")
@@ -39,7 +71,11 @@ class TokenBucketRateLimiter:
         return (min_ms + int(random_float * range_ms)) / 1000.0
 
     async def acquire(self) -> None:
-        # 1. Dev Bypass Check
+        """Acquire a token, blocking until one is available.
+
+        Respects the ``SENTINEL_DEV_BYPASS_RATE_LIMIT`` env-var for
+        development/testing.
+        """
         if os.environ.get("SENTINEL_DEV_BYPASS_RATE_LIMIT") == "true":
             logger.warning("[WARN] Rate limit bypassed due to SENTINEL_DEV_BYPASS_RATE_LIMIT=true")
             return
@@ -69,7 +105,6 @@ class TokenBucketRateLimiter:
 
         while not future.done():
             if self.is_paused_for_captcha:
-                # Wait until resumed
                 await asyncio.sleep(0.5)
                 continue
 
@@ -79,7 +114,6 @@ class TokenBucketRateLimiter:
                 if future in self.pending_requests:
                     self.pending_requests.remove(future)
             else:
-                # Wait for standard refill interval and check again
                 now = time.time()
                 elapsed_since_refill = (now - self.last_refill) * 1000.0
                 time_until_refill_ms = self.refill_interval_ms - elapsed_since_refill
@@ -87,6 +121,7 @@ class TokenBucketRateLimiter:
                 await asyncio.sleep(sleep_sec)
 
     def on_rate_limit(self):
+        """Signal that an HTTP 429 was received; apply exponential back-off."""
         if self.current_backoff_ms == 0:
             self.current_backoff_ms = self.base_backoff_ms
         else:
@@ -94,6 +129,7 @@ class TokenBucketRateLimiter:
         logger.warning(f"[WARN] Rate limit hit. Backing off for {self.current_backoff_ms}ms")
 
     def on_captcha(self, portal_id: str):
+        """Pause all requests and emit an HITL event for CAPTCHA resolution."""
         self.is_paused_for_captcha = True
         print(json.dumps({
             "event": "hitl_required",
@@ -102,5 +138,6 @@ class TokenBucketRateLimiter:
         }), flush=True)
 
     def resume(self):
+        """Resume request processing after CAPTCHA is solved."""
         self.is_paused_for_captcha = False
         logger.info("Rate limiter resumed from CAPTCHA state")

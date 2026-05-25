@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import hunter_pb2 as hunter__pb2
+from proto import hunter_pb2 as proto_dot_hunter__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in hunter_pb2_grpc.py depends on'
+        + ' but the generated code in proto/hunter_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -36,13 +36,13 @@ class HunterServiceStub(object):
         """
         self.Detect = channel.unary_stream(
                 '/hunter.HunterService/Detect',
-                request_serializer=hunter__pb2.DetectRequest.SerializeToString,
-                response_deserializer=hunter__pb2.DetectResponse.FromString,
+                request_serializer=proto_dot_hunter__pb2.DetectRequest.SerializeToString,
+                response_deserializer=proto_dot_hunter__pb2.DetectResponse.FromString,
                 _registered_method=True)
         self.Hunt = channel.unary_stream(
                 '/hunter.HunterService/Hunt',
-                request_serializer=hunter__pb2.HuntRequest.SerializeToString,
-                response_deserializer=hunter__pb2.HuntResponse.FromString,
+                request_serializer=proto_dot_hunter__pb2.HuntRequest.SerializeToString,
+                response_deserializer=proto_dot_hunter__pb2.HuntResponse.FromString,
                 _registered_method=True)
 
 
@@ -66,13 +66,13 @@ def add_HunterServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Detect': grpc.unary_stream_rpc_method_handler(
                     servicer.Detect,
-                    request_deserializer=hunter__pb2.DetectRequest.FromString,
-                    response_serializer=hunter__pb2.DetectResponse.SerializeToString,
+                    request_deserializer=proto_dot_hunter__pb2.DetectRequest.FromString,
+                    response_serializer=proto_dot_hunter__pb2.DetectResponse.SerializeToString,
             ),
             'Hunt': grpc.unary_stream_rpc_method_handler(
                     servicer.Hunt,
-                    request_deserializer=hunter__pb2.HuntRequest.FromString,
-                    response_serializer=hunter__pb2.HuntResponse.SerializeToString,
+                    request_deserializer=proto_dot_hunter__pb2.HuntRequest.FromString,
+                    response_serializer=proto_dot_hunter__pb2.HuntResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -100,8 +100,8 @@ class HunterService(object):
             request,
             target,
             '/hunter.HunterService/Detect',
-            hunter__pb2.DetectRequest.SerializeToString,
-            hunter__pb2.DetectResponse.FromString,
+            proto_dot_hunter__pb2.DetectRequest.SerializeToString,
+            proto_dot_hunter__pb2.DetectResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -127,8 +127,8 @@ class HunterService(object):
             request,
             target,
             '/hunter.HunterService/Hunt',
-            hunter__pb2.HuntRequest.SerializeToString,
-            hunter__pb2.HuntResponse.FromString,
+            proto_dot_hunter__pb2.HuntRequest.SerializeToString,
+            proto_dot_hunter__pb2.HuntResponse.FromString,
             options,
             channel_credentials,
             insecure,

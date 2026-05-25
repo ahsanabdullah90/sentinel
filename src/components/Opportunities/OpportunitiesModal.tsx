@@ -356,168 +356,95 @@ export function OpportunitiesModal({
             backgroundColor: 'rgba(0,0,0,0.2)',
             maxHeight: '420px',
           }}
-          className="table-scroll-container"
+          className="opportunities-list-container"
         >
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-            <thead
-              style={{
-                position: 'sticky',
-                top: 0,
-                backgroundColor: '#161617',
-                zIndex: 1,
-                boxShadow: '0 1px 0 rgba(255,255,255,0.05)',
-              }}
-            >
-              <tr>
-                <th style={{ width: '60px', padding: '12px', color: '#8b90a0', fontWeight: 500 }}>
-                  S.No.
-                </th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Title</th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Issuing Org</th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>
-                  Portal Source
-                </th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>Deadline</th>
-                <th style={{ padding: '12px', color: '#8b90a0', fontWeight: 500, width: '130px' }}>
-                  Status
-                </th>
-                <th
+          {/* Card list */}
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#8b90a0' }}>
+              No opportunities matching the filters found.
+            </div>
+          ) : (
+            filtered.map((opp, idx) => {
+              const statusVal = opp.status || 'discovered';
+              return (
+                <div
+                  key={opp.id}
+                  className="card glass"
                   style={{
-                    padding: '12px',
-                    color: '#8b90a0',
-                    fontWeight: 500,
-                    width: '160px',
-                    textAlign: 'center',
+                    marginBottom: '12px',
+                    padding: '16px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    backgroundColor: '#111112',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
                   }}
                 >
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    style={{ textAlign: 'center', padding: '40px', color: '#8b90a0' }}
-                  >
-                    No opportunities matching the filters found.
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((opp, idx) => {
-                  const statusVal = opp.status || 'discovered';
-                  return (
-                    <tr
-                      key={opp.id}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ color: '#fff', margin: 0, fontSize: '1rem' }}>{opp.title}</h3>
+                    <span style={{ color: '#8b90a0', fontSize: '0.85rem' }}>{opp.date || 'No Date'}</span>
+                  </div>
+                  <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
+                    <strong>Issuing Org:</strong> {opp.issuing_org || 'N/A'}
+                  </div>
+                  <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
+                    <strong>Portal:</strong> {opp.portal}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <select
+                      value={statusVal}
+                      onChange={(e) => {
+                        void handleStatusChange(opp.id, e.target.value);
+                      }}
                       style={{
-                        borderBottom: '1px solid rgba(255,255,255,0.04)',
-                        transition: 'background-color 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = 'transparent';
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: '#e5e2e3',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
                       }}
                     >
-                      <td style={{ padding: '12px', color: '#8b90a0', fontWeight: 500 }}>
-                        {idx + 1}
-                      </td>
-                      <td
-                        style={{
-                          padding: '12px',
-                          color: '#fff',
-                          fontWeight: 500,
-                          maxWidth: '280px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          cursor: onSelectOpportunity ? 'pointer' : 'default',
-                          transition: 'color 0.15s',
-                        }}
-                        title="Click to evaluate opportunity details"
-                        onClick={() => {
-                          if (onSelectOpportunity) {
-                            onSelectOpportunity(opp.id);
-                            onClose();
-                          }
-                        }}
-                        onMouseEnter={(e) => {
-                          if (onSelectOpportunity) {
-                            e.currentTarget.style.color = 'var(--accent-color)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = '#fff';
-                        }}
-                      >
-                        {opp.title}
-                      </td>
-                      <td style={{ padding: '12px', color: '#8b90a0' }}>
-                        {opp.issuing_org || 'N/A'}
-                      </td>
-                      <td style={{ padding: '12px', color: '#8b90a0' }}>{opp.portal}</td>
-                      <td style={{ padding: '12px', color: '#8b90a0' }}>{opp.date || 'No Date'}</td>
-                      <td style={{ padding: '12px' }}>
-                        <select
-                          value={statusVal}
-                          onChange={(e) => {
-                            void handleStatusChange(opp.id, e.target.value);
-                          }}
-                          style={{
-                            padding: '4px 8px',
-                            borderRadius: '6px',
-                            backgroundColor: 'rgba(255,255,255,0.04)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            color: '#e5e2e3',
-                            fontSize: '0.8rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <option value="discovered" style={{ backgroundColor: '#1c1b1c' }}>
-                            Discovered
-                          </option>
-                          <option value="downloaded" style={{ backgroundColor: '#1c1b1c' }}>
-                            Downloaded
-                          </option>
-                          <option value="ingested" style={{ backgroundColor: '#1c1b1c' }}>
-                            Ingested
-                          </option>
-                          <option value="drafted" style={{ backgroundColor: '#1c1b1c' }}>
-                            Drafted
-                          </option>
-                          <option value="submitted" style={{ backgroundColor: '#1c1b1c' }}>
-                            Submitted
-                          </option>
-                        </select>
-                      </td>
-                      <td style={{ padding: '12px', textAlign: 'center' }}>
-                        <button
-                          className="btn btn-sm btn-ghost"
-                          onClick={() => {
-                            if (onSelectOpportunity) {
-                              onSelectOpportunity(opp.id);
-                              onClose();
-                            }
-                          }}
-                          style={{
-                            display: 'inline-flex',
-                            gap: '4px',
-                            alignItems: 'center',
-                            fontSize: '0.75rem',
-                          }}
-                        >
-                          <Sparkles size={12} style={{ color: 'var(--accent-color)' }} />
-                          Evaluate RFP
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                      <option value="discovered" style={{ backgroundColor: '#1c1b1c' }}>
+                        Discovered
+                      </option>
+                      <option value="downloaded" style={{ backgroundColor: '#1c1b1c' }}>
+                        Downloaded
+                      </option>
+                      <option value="ingested" style={{ backgroundColor: '#1c1b1c' }}>
+                        Ingested
+                      </option>
+                      <option value="drafted" style={{ backgroundColor: '#1c1b1c' }}>
+                        Drafted
+                      </option>
+                      <option value="submitted" style={{ backgroundColor: '#1c1b1c' }}>
+                        Submitted
+                      </option>
+                    </select>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => {
+                        if (onSelectOpportunity) {
+                          onSelectOpportunity(opp.id);
+                          onClose();
+                        }
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        gap: '4px',
+                        alignItems: 'center',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      <Sparkles size={12} style={{ color: 'var(--accent-color)' }} />
+                      Evaluate RFP
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Footer Area */}

@@ -1,3 +1,13 @@
+"""Hunter gRPC Server Module
+
+Hosts the ``HunterService`` gRPC service on the port specified by the
+``PORT`` environment variable (default 50051).
+
+RPCs:
+    * ``Detect`` – analyse a portal URL and stream back a detection report.
+    * ``Hunt``   – execute a scraping run for a portal and stream results.
+"""
+
 import asyncio
 import logging
 import os
@@ -18,8 +28,12 @@ from .portal_runner import PortalRunner
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("hunter.server")
 
+
 class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
+    """Async gRPC servicer implementing the Hunter contract."""
+
     async def Detect(self, request, context):
+        """Analyse the portal at *request.url* and yield a detection report."""
         logger.info(f"gRPC Detect request received for URL: {request.url}")
         try:
             report = await analyze_portal(request.url)
@@ -35,10 +49,10 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
             )
 
     async def Hunt(self, request, context):
+        """Run a scraping job for *request.portal_id* and yield results."""
         logger.info(f"gRPC Hunt request received for Portal ID: {request.portal_id}")
         portal_id = request.portal_id
-        
-        # Parse or default config
+
         mock_config = {
             "id": portal_id,
             "name": "Mock Portal",
@@ -49,7 +63,7 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
             "activeWindowEnd": "23:59",
             "requestsPerMinute": 15
         }
-        
+
         if request.mock_config_json:
             try:
                 parsed = json.loads(request.mock_config_json)
@@ -72,7 +86,9 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
                 json_payload=json.dumps({"message": str(e)})
             )
 
+
 async def serve():
+    """Start the Hunter gRPC server."""
     server = grpc.aio.server()
     hunter_pb2_grpc.add_HunterServiceServicer_to_server(
         HunterServiceServicer(), server
@@ -83,6 +99,7 @@ async def serve():
     logger.info(f"Hunter gRPC Server starting on bind address: {bind_address}")
     await server.start()
     await server.wait_for_termination()
+
 
 if __name__ == "__main__":
     asyncio.run(serve())

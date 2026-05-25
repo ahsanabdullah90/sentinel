@@ -1,3 +1,12 @@
+"""Ingest Module
+
+Handles document ingestion for the RAG sidecar.  Reads a file from disk,
+extracts text, splits it into chunks, and stores the chunks in ChromaDB
+via ``ChromaClient``.
+
+Progress events are emitted as JSON lines on stdout.
+"""
+
 import os
 import json
 import logging
@@ -5,7 +14,22 @@ from .chroma_client import ChromaClient
 
 logger = logging.getLogger("rag.ingest")
 
+
 async def ingest_document(rfp_id: str, file_path: str) -> dict:
+    """Ingest a document into the RAG pipeline.
+
+    Args:
+        rfp_id: Unique identifier for the RFP.
+        file_path: Absolute path to the file to ingest.
+
+    Returns:
+        A dict with key ``chunksProcessed`` indicating how many
+        chunks were stored.
+
+    Raises:
+        FileNotFoundError: If *file_path* does not exist.
+        RuntimeError: If ChromaDB storage fails.
+    """
     print(json.dumps({
         "event": "progress",
         "portalId": "rag",
@@ -24,7 +48,7 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
         "message": f"Parsing {ext} file..."
     }), flush=True)
 
-    # 1. Stub extraction matching TS Behavior
+    # 1. Text extraction (stub – replace with real parser)
     extracted_text = f"This is mock extracted text for RFP {rfp_id} from {file_path}."
 
     print(json.dumps({
@@ -33,7 +57,7 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
         "message": "Chunking text..."
     }), flush=True)
 
-    # 2. Stub chunking matching TS Behavior
+    # 2. Chunking (stub – replace with real chunker)
     chunks = [{"text": extracted_text, "id": f"{rfp_id}-chunk-0"}]
 
     print(json.dumps({

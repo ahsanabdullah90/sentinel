@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, RefreshCw } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface Props {
   isOpen: boolean;
@@ -11,6 +12,31 @@ interface Props {
 export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Props) {
   const [ollamaModel, setOllamaModel] = useState('phi3');
   const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
+  const [customModel, setCustomModel] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelError, setModelError] = useState<string | null>(null);
+
+  const fetchModels = async (url: string) => {
+    setLoadingModels(true);
+    setModelError(null);
+    try {
+      const modelList = await invoke<string[]>('get_ollama_models', { url });
+      setModels(modelList);
+      if (modelList.length > 0) {
+        if (!modelList.includes(ollamaModel)) {
+          setOllamaModel(modelList[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching Ollama models:', err);
+      setModelError('Offline or unreachable');
+      setModels([]);
+    } finally {
+      setLoadingModels(false);
+    }
+  };
 
   useEffect(() => {
     if (currentSettings) {
@@ -19,8 +45,15 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
     }
   }, [currentSettings, isOpen]);
 
+  useEffect(() => {
+    if (isOpen) {
+      void fetchModels(ollamaUrl);
+    }
+  }, [isOpen, ollamaUrl]);
+
   const handleSave = () => {
-    onSave({ ollamaModel, ollamaUrl });
+    const finalModel = showCustomInput ? customModel : ollamaModel;
+    onSave({ ollamaModel: finalModel, ollamaUrl });
     onClose();
   };
 
@@ -79,20 +112,132 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
             >
               Ollama Model Name
             </label>
-            <input
-              value={ollamaModel}
-              onChange={(e) => setOllamaModel(e.target.value)}
-              placeholder="e.g. phi3, llama3"
-              style={{
-                width: '100%',
-                padding: '8px',
-                borderRadius: '4px',
-                border: '1px solid #333',
-                backgroundColor: '#2a2a2a',
-                color: '#fff',
-                boxSizing: 'border-box',
-              }}
-            />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {!showCustomInput && models.length > 0 ? (
+                <select
+                  value={ollamaModel}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setShowCustomInput(true);
+                    } else {
+                      setOllamaModel(e.target.value);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    height: '38px',
+                  }}
+                >
+                  {models.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ Enter Custom Model Name...</option>
+                </select>
+              ) : (
+                <input
+                  value={showCustomInput ? customModel : ollamaModel}
+                  onChange={(e) => {
+                    if (showCustomInput) {
+                      setCustomModel(e.target.value);
+                    } else {
+                      setOllamaModel(e.target.value);
+                    }
+                  }}
+                  placeholder="e.g. phi3, llama3"
+                  style={{
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    height: '38px',
+                  }}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCustomInput(false);
+                  void fetchModels(ollamaUrl);
+                }}
+                disabled={loadingModels}
+                style={{
+                  height: '38px',
+                  padding: '0 12px',
+                  borderRadius: '4px',
+                  border: '1px solid #333',
+                  backgroundColor: '#2a2a2a',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                title="Refresh Model List"
+              >
+                <RefreshCw
+                  size={14}
+                  style={{
+                    animation: loadingModels ? 'spin 1s linear infinite' : 'none',
+                  }}
+                />
+              </button>
+            </div>
+            {showCustomInput && (
+              <div style={{ marginTop: '8px' }}>
+                <input
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="Enter custom model name..."
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCustomInput(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#007aff',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    marginTop: '5px',
+                    padding: 0,
+                  }}
+                >
+                  Back to List
+                </button>
+              </div>
+            )}
+            {modelError && (
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  color: '#ff3b30',
+                  marginTop: '4px',
+                  display: 'block',
+                }}
+              >
+                Ollama status: {modelError} (Check model tags)
+              </span>
+            )}
           </div>
           <div>
             <label
