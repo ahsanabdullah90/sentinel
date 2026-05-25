@@ -78,13 +78,22 @@ class RagServiceServicer(rag_pb2_grpc.RagServiceServicer):
 
             prompt = f"Based on the following context, answer the query.\nContext: {context_text}\nQuery: {query}"
 
-            # Select first available Ollama model
+            # Select first available Ollama model dynamically
+            pulled_models = await ollama.get_pulled_models()
             selected_model = "llama3.1:8b"
-            for candidate in ["llama3.1:8b", "llama3", "mistral"]:
-                is_pulled = await ollama.is_model_pulled(candidate)
-                if is_pulled:
-                    selected_model = candidate
+            found_model = False
+            
+            preferred_candidates = ["qwen2.5-coder", "gemma", "deepseek", "phi3", "llama3.1:8b", "llama3", "mistral"]
+            for pref in preferred_candidates:
+                matched = [m for m in pulled_models if pref in m.lower() or m == pref]
+                if matched:
+                    selected_model = matched[0]
+                    found_model = True
                     break
+            
+            if not found_model and pulled_models:
+                selected_model = pulled_models[0]
+
 
             logger.info(f"Generating Ollama answer using model: {selected_model}")
             answer = await ollama.generate(

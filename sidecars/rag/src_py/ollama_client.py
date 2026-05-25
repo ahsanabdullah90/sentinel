@@ -55,6 +55,22 @@ class OllamaClient:
 
         return await asyncio.get_running_loop().run_in_executor(None, run_tags)
 
+    async def get_pulled_models(self) -> list:
+        """Get list of all pulled model names in local Ollama."""
+        def run_tags():
+            try:
+                url = f"{self.base_url}/api/tags"
+                with urllib.request.urlopen(url, timeout=2.0) as response:
+                    if response.status == 200:
+                        data = json.loads(response.read().decode("utf-8"))
+                        return [m.get("name") for m in data.get("models", []) if m.get("name")]
+            except Exception:
+                return []
+            return []
+
+        return await asyncio.get_running_loop().run_in_executor(None, run_tags)
+
+
     async def generate(self, model: str, prompt: str, system_context: str = None) -> str:
         """Generate a text completion using *model*.
 

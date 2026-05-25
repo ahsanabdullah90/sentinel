@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from proto import hunter_pb2 as proto_dot_hunter__pb2
+import hunter_pb2 as proto_dot_hunter__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
