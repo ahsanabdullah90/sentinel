@@ -149,9 +149,38 @@ async fn analyze_gaps(_rfp_id: String) -> Result<Vec<serde_json::Value>, String>
 }
 
 #[tauri::command]
-async fn bootstrap_system() -> Result<String, String> {
+async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
     use std::process::Command;
     use std::path::PathBuf;
+
+    // Run database bootstrap cleanup natively in Rust
+    if let Ok(conn) = crate::db::queries::get_db_connection(&app) {
+        let _ = conn.execute("DELETE FROM opportunities WHERE id IN ('101', '102')", []);
+        let _ = conn.execute("DELETE FROM opportunities WHERE title LIKE 'Found result for %'", []);
+        let _ = conn.execute("DELETE FROM portals WHERE id = '1'", []);
+
+        let mut presets_to_update = Vec::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT id, base_url, selector_config FROM portals") {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Ok(Some(row)) = rows.next() {
+                    let id: String = row.get(0).unwrap_or_default();
+                    let base_url: String = row.get(1).unwrap_or_default();
+                    let selector_config: Option<String> = row.get(2).unwrap_or(None);
+                    if base_url.contains("resume.brightspyre.com") && selector_config.is_none() {
+                        presets_to_update.push(id);
+                    }
+                }
+            }
+        }
+
+        for id in presets_to_update {
+            let config_preset = serde_json::json!({ "searchSelector": "input#query-data" }).to_string();
+            let _ = conn.execute(
+                "UPDATE portals SET selector_config = ?, rendering_mode = ? WHERE id = ?",
+                rusqlite::params![config_preset, "Browser (Playwright)".to_string(), id],
+            );
+        }
+    }
 
     let mut script_path = PathBuf::from("scripts/control-unit.sh");
     if !script_path.exists() {
@@ -196,6 +225,14 @@ pub fn run() {
             commands::drafting::generate_draft,
             commands::knowledge_base::add_to_knowledge_base,
             commands::knowledge_base::search_knowledge_base,
+            commands::db_commands::get_portals,
+            commands::db_commands::get_opportunities_list,
+            commands::db_commands::save_portal,
+            commands::db_commands::delete_portal,
+            commands::db_commands::toggle_portal_status,
+            commands::db_commands::finish_active_hunt,
+            commands::db_commands::get_scheduler_timestamp,
+            commands::db_commands::set_scheduler_timestamp,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -364,10 +364,36 @@ pub async fn execute_grpc_hunt(
                     
                     let payload_value = if message.payload_type == 0 { // PayloadType::Json
                         serde_json::from_str::<serde_json::Value>(&message.json_payload)
-                            .unwrap_or_else(|_| serde_json::Value::String(message.json_payload))
+                            .unwrap_or_else(|_| serde_json::Value::String(message.json_payload.clone()))
                     } else {
-                        serde_json::Value::String(message.json_payload)
+                        serde_json::Value::String(message.json_payload.clone())
                     };
+
+                    // Auto-persist to SQLite on Rust side
+                    if message.event == "opportunity_found" {
+                        if let Ok(opp) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
+                            let opp_id = opp.get("id").and_then(|v| v.as_str()).map(|s| s.to_string())
+                                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                            let portal_id = opp.get("portalId").and_then(|v| v.as_str()).map(|s| s.to_string())
+                                .unwrap_or_else(|| "1".to_string());
+                            let title = opp.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
+                            let agency = opp.get("agency").and_then(|v| v.as_str()).map(|s| s.to_string())
+                                .unwrap_or_else(|| "Unknown Agency".to_string());
+                            let due_date = opp.get("dueDate").and_then(|v| v.as_str()).map(|s| s.to_string())
+                                .unwrap_or_else(|| "2026-06-30".to_string());
+                            
+                            if let Err(e) = crate::db::queries::record_opportunity(
+                                &app_clone,
+                                opp_id,
+                                portal_id,
+                                title,
+                                agency,
+                                due_date,
+                            ) {
+                                error!("Failed to auto-persist opportunity to SQLite in Rust: {}", e);
+                            }
+                        }
+                    }
 
                     if let Err(e) = app_clone.emit(&event_name, payload_value) {
                         error!("Failed to emit hunt event {}: {}", event_name, e);
@@ -422,12 +448,40 @@ pub async fn execute_grpc_detect(
         while let Some(message) = stream.message().await.ok().flatten() {
             let event_name = format!("sentinel://hunter/{}", message.event.replace('_', "-"));
             
+            // Auto-persist detection to SQLite
+            if message.event == "portal_detected" {
+                if let Ok(report) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
+                    let url = report.get("url").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    let mut search_selector = report.get("searchSelector").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    if search_selector.is_empty() {
+                        if let Some(opts) = report.get("scrapingOptions").and_then(|v| v.as_array()) {
+                            if let Some(first_opt) = opts.first() {
+                                if let Some(desc) = first_opt.get("description").and_then(|v| v.as_str()) {
+                                    if desc.contains(": ") {
+                                        search_selector = desc.split(": ").nth(1).unwrap_or_default().to_string();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let config_json = serde_json::json!({ "searchSelector": search_selector }).to_string();
+                    if let Err(e) = crate::db::queries::update_portal_selector(
+                        &app_clone,
+                        url,
+                        config_json,
+                        "Browser (Playwright)".to_string(),
+                    ) {
+                        error!("Failed to auto-persist portal detection to SQLite in Rust: {}", e);
+                    }
+                }
+            }
+
             if let Ok(parsed_payload) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
                 if let Err(e) = app_clone.emit(&event_name, parsed_payload) {
                     error!("Failed to emit detect event {}: {}", event_name, e);
                 }
             } else {
-                if let Err(e) = app_clone.emit(&event_name, message.json_payload) {
+                if let Err(e) = app_clone.emit(&event_name, message.json_payload.clone()) {
                     error!("Failed to emit raw detect event {}: {}", event_name, e);
                 }
             }

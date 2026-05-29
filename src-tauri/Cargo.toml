@@ -47,4 +47,6 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 reqwest = { version = "0.13.3", features = ["json"] }
 base64 = "0.22.1"
 tempfile = "3.10.1"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+chrono = "0.4.38"
 

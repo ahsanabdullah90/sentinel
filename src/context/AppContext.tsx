@@ -2,8 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import SqlDatabase from '@tauri-apps/plugin-sql';
-import { Portal, Opportunity } from '../types'; // We'll create a types file later
+import { Portal, Opportunity } from '../types';
 
 // Context shape
 export interface AppContextProps {
@@ -38,11 +37,6 @@ export interface AppContextProps {
   setSystemStatus: React.Dispatch<React.SetStateAction<'booting' | 'ready' | 'error'>>;
   bootLog: string;
   setBootLog: React.Dispatch<React.SetStateAction<string>>;
-  // Refs
-  startTimeRef: React.MutableRefObject<number | null>;
-  queueRef: React.MutableRefObject<string[]>;
-  queueIndexRef: React.MutableRefObject<number>;
-  triggerNextQueuePortalRef: React.MutableRefObject<() => Promise<void>>;
   // Functions
   handleStartHunt: (portalId: string) => Promise<void>;
   handleStopHunt: () => Promise<void>;
@@ -76,6 +70,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPortal, setEditingPortal] = useState<Portal | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [lastAutoHuntTimestamp, setLastAutoHuntTimestamp] = useState<string | null>(null);
   const [settings, setSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('sentinel_settings');
@@ -97,20 +92,38 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [systemStatus, setSystemStatus] = useState<'booting' | 'ready' | 'error'>('booting');
   const [bootLog, setBootLog] = useState('Initializing Control Unit...');
 
-  // ---------- Refs ----------
+  // ---------- Private Refs ----------
   const startTimeRef = useRef<number | null>(null);
   const queueRef = useRef<string[]>([]);
   const queueIndexRef = useRef<number>(-1);
   const triggerNextQueuePortalRef = useRef<() => Promise<void>>(async () => {});
 
-  // ---------- Service Wrappers (will be delegated to services later) ----------
+  // ---------- Persistent Scheduler Time Helpers ----------
+  const loadSchedulerTimestamp = async (): Promise<string | null> => {
+    try {
+      const ts = await invoke<string | null>('get_scheduler_timestamp');
+      setLastAutoHuntTimestamp(ts);
+      return ts;
+    } catch (e) {
+      console.error('Failed to load scheduler timestamp from SQLite:', e);
+      return null;
+    }
+  };
+
+  const persistSchedulerTimestamp = async (ts: string) => {
+    try {
+      await invoke('set_scheduler_timestamp', { timestamp: ts });
+      setLastAutoHuntTimestamp(ts);
+    } catch (e) {
+      console.error('Failed to set scheduler timestamp to SQLite:', e);
+    }
+  };
+
+  // ---------- Service Wrappers (Delegating raw SQL to native Rust commands) ----------
   const loadPortals = async () => {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const result = await db.select<any[]>(
-        'SELECT id, name, base_url as url, scraper_module, keywords, status, selector_config, last_run_at, last_run_duration_ms, opportunities_count, rendering_mode, cloudflare_bypass_score FROM portals'
-      );
-      setPortals(result as Portal[]);
+      const result = await invoke<Portal[]>('get_portals');
+      setPortals(result);
     } catch (error) {
       console.error('Failed to load portals:', error);
     }
@@ -118,17 +131,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const loadOpportunities = async () => {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const result = await db.select<any[]>(
-        'SELECT o.id, o.title, o.issuing_org, o.deadline_at as date, o.status, p.name as portal FROM opportunities o JOIN portals p ON o.portal_id = p.id ORDER BY o.created_at DESC'
-      );
-      setOpportunities(result as Opportunity[]);
+      const result = await invoke<Opportunity[]>('get_opportunities_list');
+      setOpportunities(result);
     } catch (error) {
       console.error('Failed to load opportunities:', error);
     }
   };
 
-  // ---------- Core Functions (extracted from original App.tsx) ----------
+  // ---------- Core Functions ----------
   const handleStartHunt = async (portalId: string) => {
     try {
       setHunting(true);
@@ -162,28 +172,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const handleSavePortal = async (portal: Portal) => {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      if (editingPortal) {
-        await db.execute(
-          'UPDATE portals SET name = ?, base_url = ?, keywords = ?, status = ? WHERE id = ?',
-          [portal.name, portal.url, portal.keywords, portal.status || 'Active', editingPortal.id]
-        );
-        setEditingPortal(null);
-      } else {
-        await db.execute(
-          'INSERT INTO portals (id, name, base_url, keywords, status, auth_method, scraper_module) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [
-            portal.id,
-            portal.name,
-            portal.url,
-            portal.keywords,
-            'Active',
-            'public',
-            'generic_search',
-          ]
-        );
-        void invoke('detect_portal', { url: portal.url });
-      }
+      const mappedPortal = {
+        ...portal,
+        id: editingPortal ? editingPortal.id : portal.id,
+      };
+      await invoke('save_portal', { portal: mappedPortal, isEdit: !!editingPortal });
+      setEditingPortal(null);
       void loadPortals();
     } catch (error) {
       console.error('Failed to save portal:', error);
@@ -192,8 +186,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const handleDeletePortal = async (id: string) => {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('DELETE FROM portals WHERE id = ?', [id]);
+      await invoke('delete_portal', { id });
       setPortals(prev => prev.filter(p => p.id !== id));
     } catch (error) {
       console.error('Failed to delete portal:', error);
@@ -202,9 +195,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const handleTogglePortalStatus = async (id: string, currentStatus: string) => {
     try {
-      const nextStatus = currentStatus === 'Active' ? 'Inactive' : 'Active';
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('UPDATE portals SET status = ? WHERE id = ?', [nextStatus, id]);
+      await invoke('toggle_portal_status', { id, currentStatus });
       void loadPortals();
     } catch (error) {
       console.error('Failed to toggle portal status:', error);
@@ -215,28 +206,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       const startTime = startTimeRef.current || Date.now();
       const duration = Date.now() - startTime;
-      const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
-      const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
 
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const countRes = await db.select<any[]>(
-        'SELECT COUNT(*) as cnt FROM opportunities WHERE portal_id = ?',
-        [portalId]
-      );
-      const oppCount = countRes[0]?.cnt || 0;
-
+      const countRes = opportunities.filter(o => o.portal === portals.find(p => p.id === portalId)?.name).length;
       const portal = portals.find(p => p.id === portalId);
       const renderingMode = portal?.selector_config || portalId === 'xbfs76tfq'
         ? 'Browser (Playwright)'
         : 'Static HTML';
-      const guardScore = 'Low Risk';
 
-      await db.execute(
-        'UPDATE portals SET last_run_at = ?, last_run_duration_ms = ?, opportunities_count = ?, rendering_mode = ?, cloudflare_bypass_score = ? WHERE id = ?',
-        [timestamp, duration, oppCount, renderingMode, guardScore, portalId]
-      );
+      await invoke('finish_active_hunt', {
+        portalId,
+        durationMs: duration,
+        oppCount: countRes,
+        renderingMode,
+      });
 
-      console.log(`Successfully finished hunt for portal ${portalId}. Yield: ${oppCount} items.`);
+      console.log(`Successfully finished hunt for portal ${portalId}.`);
       void loadOpportunities();
       void loadPortals();
     } catch (err) {
@@ -258,23 +242,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       setTimeout(async () => {
         try {
-          const db = await SqlDatabase.load('sqlite:sentinel.db');
-          const portalsRes = await db.select<any[]>('SELECT * FROM portals');
-          const portal = portalsRes.find(p => p.id === nextPortalId);
+          const list = await invoke<Portal[]>('get_portals');
+          const portal = list.find(p => p.id === nextPortalId);
           if (portal) {
-            const mappedPortal = {
-              id: portal.id,
-              name: portal.name,
-              url: portal.base_url,
-              keywords: portal.keywords,
-              status: portal.status,
-              selector_config: portal.selector_config,
-            };
             setHunting(true);
             startTimeRef.current = Date.now();
             const id = await invoke('start_hunt_session', {
               portalId: nextPortalId,
-              config: JSON.stringify(mappedPortal),
+              config: JSON.stringify(portal),
             });
             setSessionId(id as string);
           } else {
@@ -314,21 +289,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setBootLog('Running Control Unit script...');
       const log = await invoke('bootstrap_system');
       console.log('Bootstrap complete:', log);
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('DELETE FROM opportunities WHERE id IN (?, ?)', ['101', '102']);
-      await db.execute("DELETE FROM opportunities WHERE title LIKE 'Found result for %'");
-      await db.execute('DELETE FROM portals WHERE id = ?', ['1']);
-
-      const activePortalsList = await db.select<any[]>('SELECT id, base_url, selector_config FROM portals');
-      for (const p of activePortalsList) {
-        if (p.base_url.includes('resume.brightspyre.com') && !p.selector_config) {
-          const configPreset = { searchSelector: 'input#query-data' };
-          await db.execute(
-            'UPDATE portals SET selector_config = ?, rendering_mode = ? WHERE id = ?',
-            [JSON.stringify(configPreset), 'Browser (Playwright)', p.id]
-          );
-        }
-      }
+      
+      void loadSchedulerTimestamp();
       void loadOpportunities();
       void loadPortals();
       setBootLog('All systems green. Sentinel is ready.');
@@ -360,51 +322,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // ---------- Tauri Event Listeners ----------
+  // ---------- Tauri Event Listeners (Refactored to rely on backend auto-persistence) ----------
   useEffect(() => {
     const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
     if (!isTauri) return;
 
-    const unlistenPortal = listen('sentinel://hunter/portal-detected', async (event: any) => {
-      const report = event.payload;
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      let searchSelector = report.searchSelector || '';
-      if (!searchSelector && report.scrapingOptions && report.scrapingOptions[0]) {
-        const desc = report.scrapingOptions[0].description || '';
-        if (desc.includes(': ')) {
-          searchSelector = desc.split(': ')[1];
-        }
-      }
-      const config = { searchSelector };
-      const sanitizedUrl = report.url.replace(/\/+$/, '');
-      await db.execute(
-        'UPDATE portals SET selector_config = ?, rendering_mode = ? WHERE base_url = ? OR base_url = ? OR base_url LIKE ?',
-        [JSON.stringify(config), 'Browser (Playwright)', sanitizedUrl, sanitizedUrl + '/', `%${sanitizedUrl}%`]
-      );
+    const unlistenPortal = listen('sentinel://hunter/portal-detected', async () => {
+      // Backend automatically persisted this. Just trigger a reload.
       void loadPortals();
     });
 
-    const unlistenOpp = listen('sentinel://hunter/opportunity-found', async (event: any) => {
-      const opp = event.payload;
-      try {
-        const db = await SqlDatabase.load('sqlite:sentinel.db');
-        const oppId = opp.id || Math.random().toString(36).substr(2, 9);
-        const portalId = opp.portalId || '1';
-        const existing = await db.select<any[]>('SELECT title FROM opportunities');
-        const normalizedInputTitle = opp.title.trim().replace(/\\s+/g, ' ');
-        const isDuplicate = existing.some(row => row.title.trim().replace(/\\s+/g, ' ').toLowerCase() === normalizedInputTitle.toLowerCase());
-        if (!isDuplicate) {
-          await db.execute(
-            'INSERT INTO opportunities (id, portal_id, title, issuing_org, deadline_at, status) VALUES (?, ?, ?, ?, ?, ?)',
-            [oppId, portalId, normalizedInputTitle, opp.agency || 'Unknown Agency', opp.dueDate || '2026-06-30', 'discovered']
-          );
-          await db.execute('UPDATE portals SET opportunities_count = COALESCE(opportunities_count, 0) + 1 WHERE id = ?', [portalId]);
-          void loadOpportunities();
-          void loadPortals();
-        }
-      } catch (e) {
-        console.error('Error handling opportunity-found event', e);
-      }
+    const unlistenOpp = listen('sentinel://hunter/opportunity-found', async () => {
+      // Backend automatically persisted this. Just trigger a reload.
+      void loadOpportunities();
+      void loadPortals();
     });
 
     const unlistenProgress = listen('sentinel://hunter/progress', async (event: any) => {
@@ -432,15 +363,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       unlistenProgress.then(f => f?.());
       unlistenError.then(f => f?.());
     };
-  }, []);
+  }, [opportunities, portals]);
 
   // ---------- Scheduler UI Updates ----------
   useEffect(() => {
-    function updateSchedulerStatus() {
+    async function updateSchedulerStatus() {
       const now = new Date();
       const hour = now.getHours();
       const inWindow = hour >= 9 && hour < 12;
-      const lastRunStr = localStorage.getItem('sentinel_last_auto_hunt_timestamp');
+      const lastRunStr = await loadSchedulerTimestamp();
       let lastRunText = 'Never';
       if (lastRunStr) {
         const diffMin = Math.floor((Date.now() - parseInt(lastRunStr, 10)) / 60000);
@@ -450,24 +381,24 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (inWindow) setSchedulerInfo(`Active Window • Last Auto-Run: ${lastRunText}`);
       else setSchedulerInfo(`Idle (Window: 09:00 AM - 11:59 AM) • Last: ${lastRunText}`);
     }
-    updateSchedulerStatus();
+    void updateSchedulerStatus();
     const interval = setInterval(updateSchedulerStatus, 30000);
     return () => clearInterval(interval);
   }, []);
 
   // ---------- Automated Hourly Hunt ----------
   useEffect(() => {
-    const checkAndTriggerAutoHunt = () => {
+    const checkAndTriggerAutoHunt = async () => {
       const now = new Date();
       const hour = now.getHours();
       const inWindow = hour >= 9 && hour < 12;
       if (!inWindow || hunting || portals.length === 0) return;
-      const lastRunStr = localStorage.getItem('sentinel_last_auto_hunt_timestamp');
+      const lastRunStr = lastAutoHuntTimestamp || await loadSchedulerTimestamp();
       const oneHourMs = 3600000;
       const shouldTrigger = !lastRunStr || Date.now() - parseInt(lastRunStr, 10) >= oneHourMs;
       if (shouldTrigger) {
         console.log('Automated scheduler: Triggering hourly hunts for all active websites...');
-        localStorage.setItem('sentinel_last_auto_hunt_timestamp', Date.now().toString());
+        await persistSchedulerTimestamp(Date.now().toString());
         const activePortals = portals.filter(p => p.status === 'Active');
         if (activePortals.length > 0) {
           setHuntLogs([`[${new Date().toLocaleTimeString()}] [AUTOMATED] Triggering scheduled hourly hunt...`]);
@@ -475,10 +406,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         }
       }
     };
-    checkAndTriggerAutoHunt();
+    void checkAndTriggerAutoHunt();
     const interval = setInterval(checkAndTriggerAutoHunt, 30000);
     return () => clearInterval(interval);
-  }, [portals, hunting]);
+  }, [portals, hunting, lastAutoHuntTimestamp]);
 
   // Keep triggerNextQueuePortalRef up‑to‑date and trigger boot sequence
   useEffect(() => {
@@ -518,10 +449,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setSystemStatus,
     bootLog,
     setBootLog,
-    startTimeRef,
-    queueRef,
-    queueIndexRef,
-    triggerNextQueuePortalRef,
     handleStartHunt,
     handleStopHunt,
     handleSavePortal,

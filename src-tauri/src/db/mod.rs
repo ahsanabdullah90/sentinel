@@ -1,3 +1,5 @@
+pub mod queries;
+
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 pub fn init() -> Vec<Migration> {
@@ -74,6 +76,15 @@ pub fn init() -> Vec<Migration> {
                       file_bytes BLOB NOT NULL,
                       extracted_text TEXT,
                       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                  );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 8,
+            description: "add_key_value_store",
+            sql: "CREATE TABLE IF NOT EXISTS key_value_store (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
                   );",
             kind: MigrationKind::Up,
         }
