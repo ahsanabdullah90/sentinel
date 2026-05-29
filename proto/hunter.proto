@@ -7,10 +7,16 @@ message DetectRequest {
   string url = 1;
 }
 
+enum PayloadType {
+  JSON = 0;
+  TEXT = 1;
+}
+
 // Response emitted when a portal is detected
 message DetectResponse {
   string event = 1; // "portal_detected"
   string json_payload = 2; // JSON string of report
+  PayloadType payload_type = 3;
 }
 
 // Request to start a hunt on a portal
@@ -23,6 +29,7 @@ message HuntRequest {
 message HuntResponse {
   string event = 1; // e.g., "hunt_complete", "error"
   string json_payload = 2;
+  PayloadType payload_type = 3;
 }
 
 service HunterService {

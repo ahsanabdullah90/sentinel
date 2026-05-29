@@ -70,7 +70,8 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
                     event_name, payload = item
                     yield hunter_pb2.DetectResponse(
                         event=event_name,
-                        json_payload=json.dumps(payload)
+                        json_payload=json.dumps(payload),
+                        payload_type=hunter_pb2.PayloadType.JSON
                     )
                 except asyncio.TimeoutError:
                     continue
@@ -126,7 +127,8 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
             logger.error(f"Config validation error: {str(ve)}")
             yield hunter_pb2.HuntResponse(
                 event="error",
-                json_payload=json.dumps({"message": f"Configuration validation failed: {str(ve)}"})
+                json_payload=json.dumps({"message": f"Configuration validation failed: {str(ve)}"}),
+                payload_type=hunter_pb2.PayloadType.JSON
             )
             return
 
@@ -167,7 +169,8 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
                     event_name, payload = item
                     yield hunter_pb2.HuntResponse(
                         event=event_name,
-                        json_payload=json.dumps(payload)
+                        json_payload=json.dumps(payload),
+                        payload_type=hunter_pb2.PayloadType.JSON
                     )
                 except asyncio.TimeoutError:
                     continue
@@ -185,6 +188,13 @@ async def serve():
     hunter_pb2_grpc.add_HunterServiceServicer_to_server(
         HunterServiceServicer(), server
     )
+    
+    # Add standard gRPC health checks
+    from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+    health_servicer = health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+
     port = os.environ.get("PORT", "50051")
     bind_address = f"0.0.0.0:{port}"
     server.add_insecure_port(bind_address)

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::net::TcpStream;
 use std::sync::Mutex;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -10,6 +9,9 @@ use tokio::sync::oneshot;
 pub mod proto {
     pub mod hunter {
         tonic::include_proto!("hunter");
+    }
+    pub mod health {
+        tonic::include_proto!("grpc.health.v1");
     }
 }
 
@@ -169,7 +171,18 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
 }
 
 // Heuristic Python script finder
-fn find_python_script(script_name: &str) -> Option<String> {
+fn find_python_script(app: &AppHandle, script_name: &str) -> Option<String> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let test_path = resource_dir.join("sidecars").join("hunter").join("src_py").join(script_name);
+        if test_path.exists() {
+            return Some(test_path.to_string_lossy().into_owned());
+        }
+        let alt_path = resource_dir.join("hunter").join("src_py").join(script_name);
+        if alt_path.exists() {
+            return Some(alt_path.to_string_lossy().into_owned());
+        }
+    }
+
     if let Ok(mut dir) = std::env::current_dir() {
         loop {
             let test_path = dir.join("sidecars").join("hunter").join("src_py").join(script_name);
@@ -186,30 +199,57 @@ fn find_python_script(script_name: &str) -> Option<String> {
     None
 }
 
-// TCP Port Healthcheck
-fn is_port_open(port: u16) -> bool {
-    TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok()
+// Standard gRPC healthcheck using grpc.health.v1
+async fn is_grpc_service_healthy(port: u16) -> bool {
+    use proto::health::health_client::HealthClient;
+    use proto::health::HealthCheckRequest;
+
+    let channel_res = tonic::transport::Endpoint::from_shared(format!("http://127.0.0.1:{}", port))
+        .map(|e| e.connect_timeout(std::time::Duration::from_millis(150)))
+        .map(|e| e.connect_lazy());
+
+    if let Ok(channel) = channel_res {
+        let mut client = HealthClient::new(channel);
+        let request = HealthCheckRequest { service: "".to_string() };
+        if let Ok(response) = client.check(request).await {
+            return response.into_inner().status == 1; // ServingStatus::Serving is 1
+        }
+    }
+    false
+}
+
+fn find_available_port() -> Option<u16> {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| listener.local_addr())
+        .map(|addr| addr.port())
+        .ok()
 }
 
 // Dynamic server auto-launcher
 pub async fn ensure_hunter_grpc_server_running(app: AppHandle) -> Result<(), crate::errors::SentinelError> {
-    if is_port_open(50051) {
-        info!("Hunter gRPC server is already running and listening on port 50051.");
+    let current_port = crate::ipc::HUNTER_PORT.load(std::sync::atomic::Ordering::SeqCst);
+    if is_grpc_service_healthy(current_port).await {
+        info!("Hunter gRPC server is already running and listening on port {}.", current_port);
         return Ok(());
     }
 
     info!("Hunter gRPC server not running. Launching Python subprocess...");
 
-    let script_path = find_python_script("server.py")
+    let port = find_available_port().unwrap_or(50051);
+    crate::ipc::HUNTER_PORT.store(port, std::sync::atomic::Ordering::SeqCst);
+    info!("Allocated dynamic port {} for Hunter gRPC service", port);
+
+    let script_path = find_python_script(&app, "server.py")
         .unwrap_or_else(|| "sidecars/hunter/src_py/server.py".to_string());
         
     info!("Resolved Python server script path to: {}", script_path);
 
     let registry = app.state::<HunterRegistry>();
     
-    // Launch Python server
+    // Launch Python server with dynamic PORT environment variable
     let cmd = app.shell().command("python3")
-        .args(vec![script_path]);
+        .args(vec![script_path])
+        .env("PORT", port.to_string());
 
     let (mut rx, child) = match cmd.spawn() {
         Ok(res) => res,
@@ -248,16 +288,16 @@ pub async fn ensure_hunter_grpc_server_running(app: AppHandle) -> Result<(), cra
         }
     });
 
-    // Wait for the port to open (up to 5 seconds)
+    // Wait for the port to open and service to be healthy (up to 5 seconds)
     for i in 0..25 {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        if is_port_open(50051) {
-            info!("Hunter gRPC server launched and verified healthy after {}ms.", i * 200);
+        if is_grpc_service_healthy(port).await {
+            info!("Hunter gRPC server launched and verified healthy on port {} after {}ms.", port, i * 200);
             return Ok(());
         }
     }
 
-    error!("Hunter gRPC server failed to start listening on port 50051 within 5 seconds.");
+    error!("Hunter gRPC server failed to start listening on port {} within 5 seconds.", port);
     Err(crate::errors::SentinelError::Sidecar(
         "Hunter gRPC server failed to respond within timeout.".to_string()
     ))
@@ -274,7 +314,8 @@ pub async fn execute_grpc_hunt(
     ensure_hunter_grpc_server_running(app.clone()).await?;
 
     // 2. Setup Tonic connection
-    let mut client = match HunterServiceClient::connect("http://127.0.0.1:50051").await {
+    let hunter_port = crate::ipc::HUNTER_PORT.load(std::sync::atomic::Ordering::SeqCst);
+    let mut client = match HunterServiceClient::connect(format!("http://127.0.0.1:{}", hunter_port)).await {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to connect to Hunter gRPC service: {}", e);
@@ -321,14 +362,15 @@ pub async fn execute_grpc_hunt(
                 while let Some(message) = stream.message().await.ok().flatten() {
                     let event_name = format!("sentinel://hunter/{}", message.event.replace('_', "-"));
                     
-                    if let Ok(parsed_payload) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
-                        if let Err(e) = app_clone.emit(&event_name, parsed_payload) {
-                            error!("Failed to emit hunt event {}: {}", event_name, e);
-                        }
+                    let payload_value = if message.payload_type == 0 { // PayloadType::Json
+                        serde_json::from_str::<serde_json::Value>(&message.json_payload)
+                            .unwrap_or_else(|_| serde_json::Value::String(message.json_payload))
                     } else {
-                        if let Err(e) = app_clone.emit(&event_name, message.json_payload) {
-                            error!("Failed to emit raw hunt event {}: {}", event_name, e);
-                        }
+                        serde_json::Value::String(message.json_payload)
+                    };
+
+                    if let Err(e) = app_clone.emit(&event_name, payload_value) {
+                        error!("Failed to emit hunt event {}: {}", event_name, e);
                     }
                 }
             } => {
@@ -352,7 +394,8 @@ pub async fn execute_grpc_detect(
 ) -> Result<(), crate::errors::SentinelError> {
     ensure_hunter_grpc_server_running(app.clone()).await?;
 
-    let mut client = match HunterServiceClient::connect("http://127.0.0.1:50051").await {
+    let hunter_port = crate::ipc::HUNTER_PORT.load(std::sync::atomic::Ordering::SeqCst);
+    let mut client = match HunterServiceClient::connect(format!("http://127.0.0.1:{}", hunter_port)).await {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to connect to Hunter gRPC service for detect: {}", e);

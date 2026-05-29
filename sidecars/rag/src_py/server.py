@@ -37,27 +37,32 @@ class RagServiceServicer(rag_pb2_grpc.RagServiceServicer):
     async def Ingest(self, request, context):
         """Ingest *request.content* under *request.document_id*."""
         logger.info(f"gRPC Ingest request received for document: {request.document_id}")
+        import tempfile
         document_id = request.document_id
         content = request.content
-        temp_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), f"../temp_{document_id}.txt"))
-
+        
+        # Use NamedTemporaryFile to create a secure temporary file
+        temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        temp_file_path = temp_file.name
+        
         try:
-            with open(temp_file_path, "w", encoding="utf-8") as f:
-                f.write(content)
-
+            temp_file.write(content)
+            temp_file.close() # Close to flush and release handle so other processes can read it
+            
             await ingest_document(document_id, temp_file_path)
-
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-
             return rag_pb2.IngestResponse(status="ok")
         except Exception as e:
             logger.error(f"Error in gRPC Ingest: {str(e)}")
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
             return rag_pb2.IngestResponse(status="error")
+        finally:
+            # Guaranteed deletion
+            if os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception as ex:
+                    logger.warning(f"Failed to delete temp file {temp_file_path}: {ex}")
 
     async def Query(self, request, context):
         """Answer *request.query* using RAG context + Ollama."""
@@ -80,6 +85,9 @@ class RagServiceServicer(rag_pb2_grpc.RagServiceServicer):
 
             # Select first available Ollama model dynamically
             pulled_models = await ollama.get_pulled_models()
+            if not pulled_models:
+                raise Exception("No pulled models found in Ollama. Please run 'ollama pull qwen2.5-coder' or select a pulled model in Settings first.")
+
             selected_model = "llama3.1:8b"
             found_model = False
             
@@ -120,6 +128,13 @@ async def serve():
     rag_pb2_grpc.add_RagServiceServicer_to_server(
         RagServiceServicer(), server
     )
+    
+    # Add standard gRPC health checks
+    from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+    health_servicer = health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+
     port = os.environ.get("PORT", "50052")
     bind_address = f"0.0.0.0:{port}"
     server.add_insecure_port(bind_address)

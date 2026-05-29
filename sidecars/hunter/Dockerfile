@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
     "protobuf>=5.26.1" \
     playwright \
     google-generativeai \
-    redis
+    redis \
+    grpcio-health-checking
 
 # Install Playwright browsers and system dependencies
 RUN playwright install chromium --with-deps

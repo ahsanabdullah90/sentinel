@@ -5,7 +5,8 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
     grpcio \
     grpcio-tools \
-    "protobuf>=5.26.1"
+    "protobuf>=5.26.1" \
+    grpcio-health-checking
 
 # Copy source code and proto
 COPY sidecars/rag/src_py ./sidecars/rag/src_py

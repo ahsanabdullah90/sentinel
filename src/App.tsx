@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Shield,
   Search,
@@ -59,6 +59,26 @@ function App() {
     bootstrapEngines,
     checkOllama,
   } = useAppContext();
+
+  const memoizedPortals = useMemo(() => {
+    return portals.map((p) => {
+      let searchSelector = '';
+      try {
+        if (p.selector_config) {
+          const cfg = JSON.parse(p.selector_config);
+          if (cfg && cfg.searchSelector) {
+            searchSelector = cfg.searchSelector;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse selector_config:', e);
+      }
+      return {
+        ...p,
+        searchSelector,
+      };
+    });
+  }, [portals]);
 
   function handleOpenAddModal() {
     setEditingPortal(null);
@@ -143,46 +163,38 @@ function App() {
           <span>Sentinel</span>
         </div>
         <nav className="nav-links">
-          <a
-            href="#"
+          <button
             className={`nav-link ${currentView === 'hunt' || currentView === 'opportunity-detail' ? 'active' : ''}`}
-            onClick={(e) => {
-              e.preventDefault();
+            onClick={() => {
               setCurrentView('hunt');
             }}
           >
             <Search size={18} /> Hunt
-          </a>
-          <a
-            href="#"
+          </button>
+          <button
             className={`nav-link ${currentView === 'knowledge' ? 'active' : ''}`}
-            onClick={(e) => {
-              e.preventDefault();
+            onClick={() => {
               setCurrentView('knowledge');
             }}
           >
             <Database size={18} /> Knowledge Base
-          </a>
-          <a
-            href="#"
+          </button>
+          <button
             className={`nav-link ${currentView === 'drafts' ? 'active' : ''}`}
-            onClick={(e) => {
-              e.preventDefault();
+            onClick={() => {
               setCurrentView('drafts');
             }}
           >
             <FileText size={18} /> Saved Drafts
-          </a>
-          <a
-            href="#"
+          </button>
+          <button
             className="nav-link"
-            onClick={(e) => {
-              e.preventDefault();
+            onClick={() => {
               setIsSettingsOpen(true);
             }}
           >
             <Settings size={18} /> Settings
-          </a>
+          </button>
         </nav>
       </aside>
 
@@ -382,19 +394,8 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {portals.map((p) => {
-                      let searchSelector = '';
-                      try {
-                        if (p.selector_config) {
-                          const cfg = JSON.parse(p.selector_config);
-                          if (cfg && cfg.searchSelector) {
-                            searchSelector = cfg.searchSelector;
-                          }
-                        }
-                      } catch (e) {
-                        console.error('Failed to parse selector_config:', e);
-                      }
-
+                    {memoizedPortals.map((p) => {
+                      const { searchSelector } = p;
                       const isActive = p.status === 'Active';
 
                       return (

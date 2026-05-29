@@ -65,6 +65,12 @@ body {
   text-decoration: none;
   border-radius: 8px;
   transition: all 0.2s;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
 }
 
 .nav-link:hover,

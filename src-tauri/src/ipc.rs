@@ -9,12 +9,19 @@ pub mod rag {
 pub use hunter::hunter_service_client::HunterServiceClient;
 pub use rag::rag_service_client::RagServiceClient;
 
+use std::sync::atomic::{AtomicU16, Ordering};
+
+pub static HUNTER_PORT: AtomicU16 = AtomicU16::new(50051);
+pub static RAG_PORT: AtomicU16 = AtomicU16::new(50052);
+
 pub async fn get_hunter_client() -> Result<HunterServiceClient<tonic::transport::Channel>, tonic::transport::Error> {
-    HunterServiceClient::connect("http://127.0.0.1:50051").await
+    let port = HUNTER_PORT.load(Ordering::SeqCst);
+    HunterServiceClient::connect(format!("http://127.0.0.1:{}", port)).await
 }
 
 pub async fn get_rag_client() -> Result<RagServiceClient<tonic::transport::Channel>, tonic::transport::Error> {
-    RagServiceClient::connect("http://127.0.0.1:50052").await
+    let port = RAG_PORT.load(Ordering::SeqCst);
+    RagServiceClient::connect(format!("http://127.0.0.1:{}", port)).await
 }
 
 #[cfg(test)]

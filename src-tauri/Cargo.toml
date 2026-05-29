@@ -46,4 +46,5 @@ tauri-plugin-shell = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 reqwest = { version = "0.13.3", features = ["json"] }
 base64 = "0.22.1"
+tempfile = "3.10.1"
 

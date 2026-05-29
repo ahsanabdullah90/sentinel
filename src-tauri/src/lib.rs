@@ -87,26 +87,21 @@ async fn generate_vision_description(
 #[tauri::command]
 async fn extract_pdf_text_from_bytes(bytes: Vec<u8>) -> Result<String, String> {
     use std::process::Command;
-    use std::fs::File;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
-    let temp_dir = std::env::current_dir().map_err(|e| e.to_string())?;
-    let temp_path = temp_dir.join(format!("temp_extracted_{}.pdf", uuid::Uuid::new_v4()));
+    // Create an OS-managed temporary file that gets auto-deleted when dropped
+    let mut temp_file = NamedTempFile::new().map_err(|e| e.to_string())?;
+    temp_file.write_all(&bytes).map_err(|e| e.to_string())?;
+    
+    let temp_path = temp_file.path();
 
-    // Write bytes to temp file
-    let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
-    file.write_all(&bytes).map_err(|e| e.to_string())?;
-
-    // Extract text
+    // Extract text using pdftotext
     let output = Command::new("pdftotext")
-        .arg(&temp_path)
+        .arg(temp_path)
         .arg("-")
-        .output();
-
-    // Clean up temp file immediately
-    let _ = std::fs::remove_file(&temp_path);
-
-    let output = output.map_err(|e| e.to_string())?;
+        .output()
+        .map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
