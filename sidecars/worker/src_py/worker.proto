@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package worker;
+
+service WorkerService {
+  // Enqueue a job to the Redis queue
+  rpc EnqueueJob (JobRequest) returns (JobResponse);
+}
+
+message JobRequest {
+  string rfp_id = 1;
+  string payload = 2; // optional additional data
+}
+
+message JobResponse {
+  bool success = 1;
+  string message = 2;
+}

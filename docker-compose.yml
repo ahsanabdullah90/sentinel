@@ -47,6 +47,25 @@ services:
       - chromadb
       - ollama
 
+  worker:
+    build:
+      context: .
+      dockerfile: sidecars/worker/Dockerfile
+    ports:
+      - '50053:50053'
+    environment:
+      - PORT=50053
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  gap-engine:
+    build:
+      context: .
+      dockerfile: sidecars/gap-engine/Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+
 volumes:
   ollama_data:
   chroma_data:

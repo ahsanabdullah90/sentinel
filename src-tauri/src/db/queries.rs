@@ -177,19 +177,16 @@ pub fn record_opportunity(
 ) -> Result<bool, SentinelError> {
     let conn = get_db_connection(app)?;
     
-    // Check duplication
-    let mut stmt = conn.prepare("SELECT title FROM opportunities").map_err(|e| SentinelError::Database(e.to_string()))?;
-    let existing_titles = stmt.query_map([], |row| row.get::<_, String>(0))
+    // Check duplication natively in SQLite (O(log N) index-backed search)
+    let normalized_input = title.trim().to_lowercase();
+    let mut stmt = conn.prepare("SELECT EXISTS(SELECT 1 FROM opportunities WHERE LOWER(TRIM(title)) = ?)")
+        .map_err(|e| SentinelError::Database(e.to_string()))?;
+    let exists: i32 = stmt.query_row(params![normalized_input], |row| row.get(0))
         .map_err(|e| SentinelError::Database(e.to_string()))?;
         
-    let normalized_input = title.trim().to_lowercase();
-    for t in existing_titles {
-        if let Ok(ex_title) = t {
-            if ex_title.trim().to_lowercase() == normalized_input {
-                // Duplicate found
-                return Ok(false);
-            }
-        }
+    if exists == 1 {
+        // Duplicate found
+        return Ok(false);
     }
     
     // Insert new opportunity

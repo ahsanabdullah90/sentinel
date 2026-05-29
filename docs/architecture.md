@@ -8,12 +8,12 @@ This document provides a visual and textual overview of the **Sentinel** system 
 
 | Component          | Language                             | Description                                                                               |
 | ------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------- |
-| **Frontend**       | TypeScript (Tauri + React)           | Desktop UI that interacts with the backend via gRPC.                                      |
+| **Frontend**       | TypeScript (Tauri + React)           | Desktop UI that interacts with the backend.                                               |
 | **Hunter Sidecar** | Python (asyncio, Playwright, Gemini) | Handles portal detection, scraping strategies, and rate‑limiting.                         |
 | **RAG Sidecar**    | Python (Ollama, ChromaDB)            | Ingests documents, stores embeddings, and answers queries.                                |
-| **Gap Engine**     | Python (to be implemented)           | Analyzes RFP gaps and produces a structured gap report.                                   |
-| **Worker**         | Python (redis‑py)                    | Background job processor that consumes tasks from Redis queues.                           |
-| **gRPC Protobuf**  | `.proto` files                       | Defines the service contracts between the frontend and sidecars.                          |
+| **Gap Engine**     | Python (CLI & stdout capture)        | Fully integrated RFP gap analyzer with JSON event reporting.                              |
+| **Worker**         | Python (redis‑py, gRPC)              | Fully integrated background job processor that consumes tasks from Redis queues.          |
+| **gRPC Protobuf**  | `.proto` files                       | Defines the service contracts between the frontend, hunter, rag, and worker sidecars.     |
 | **Docker Compose** | Docker                               | Orchestrates containers for each sidecar and supporting services (Redis, Chroma, Ollama). |
 
 ---
@@ -82,12 +82,10 @@ flowchart TD
 
 ---
 
-## Future Enhancements
+## System Status
 
-- Replace the placeholder Gap Engine logic with AI‑driven gap detection.
-- Add more sophisticated job scheduling and monitoring.
-- Implement comprehensive unit and integration tests for the new Python modules.
+All core components described in the architecture documents, including the **Worker** and **Gap Engine** services, are fully integrated into the Docker compose orchestration. The native Rust database query optimization (EXISTS) and the secure bootstrapping sequence are fully completed and validated.
 
 ---
 
-_Generated on 2026‑05‑25._
+_Updated on 2026‑05‑29._

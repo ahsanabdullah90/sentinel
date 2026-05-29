@@ -144,14 +144,55 @@ async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn analyze_gaps(_rfp_id: String) -> Result<Vec<serde_json::Value>, String> {
-    Ok(vec![])
+async fn analyze_gaps(rfp_id: String) -> Result<Vec<serde_json::Value>, String> {
+    use std::process::Command;
+    use std::path::PathBuf;
+
+    let python_exec = if cfg!(windows) { "python.exe" } else { "python3" };
+    let mut script_path = PathBuf::from("sidecars/gap-engine/src_py/gap_engine.py");
+    if !script_path.exists() {
+        script_path = PathBuf::from("../sidecars/gap-engine/src_py/gap_engine.py");
+    }
+
+    if !script_path.exists() {
+        return Err("Gap Engine script not found".to_string());
+    }
+
+    let output = Command::new(python_exec)
+        .arg(script_path)
+        .arg(&rfp_id)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(format!("Gap Engine execution failed: {}", err_msg));
+    }
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
+    
+    // Find the JSON line in the stdout
+    for line in stdout_str.lines() {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
+            if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
+                if event == "gap_report_generated" {
+                    if let Some(gaps) = val.get("data").and_then(|d| d.get("gaps")).and_then(|g| g.as_array()) {
+                        return Ok(gaps.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Err("Failed to parse gaps from Gap Engine output".to_string())
 }
 
 #[tauri::command]
 async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
     use std::process::Command;
-    use std::path::PathBuf;
+    use std::net::TcpStream;
+    use std::time::Duration;
+    use std::thread::sleep;
 
     // Run database bootstrap cleanup natively in Rust
     if let Ok(conn) = crate::db::queries::get_db_connection(&app) {
@@ -182,21 +223,87 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
         }
     }
 
-    let mut script_path = PathBuf::from("scripts/control-unit.sh");
-    if !script_path.exists() {
-        script_path = PathBuf::from("../scripts/control-unit.sh");
+    // 1. Bring up Docker compose infrastructure securely and platform-independently
+    let mut compose_status = Command::new("docker")
+        .args(["compose", "up", "-d"])
+        .status();
+
+    if compose_status.is_err() {
+        // Fallback to older docker-compose command
+        compose_status = Command::new("docker-compose")
+            .args(["up", "-d"])
+            .status();
     }
 
-    let output = Command::new("bash")
-        .arg(script_path)
-        .output()
-        .map_err(|e| e.to_string())?;
+    if let Err(e) = compose_status {
+        return Err(format!("Failed to bring up Docker infrastructure: {}", e));
+    }
 
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    // 2. Poll health natively via TcpStream socket checks to avoid calling external binaries (curl, nc)
+    let poll_timeout = Duration::from_secs(2);
+    let mut logs = vec![String::from("Sentinel Bootstrapped Natively in Rust:")];
+
+    // Wait for Ollama
+    let mut ollama_ok = false;
+    for _ in 0..15 {
+        if TcpStream::connect_timeout(&"127.0.0.1:11434".parse().unwrap(), poll_timeout).is_ok() {
+            ollama_ok = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if ollama_ok {
+        logs.push(String::from("[✓] Ollama is ONLINE"));
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+        logs.push(String::from("[-] Ollama check timed out"));
     }
+
+    // Wait for ChromaDB
+    let mut chroma_ok = false;
+    for _ in 0..15 {
+        if TcpStream::connect_timeout(&"127.0.0.1:8000".parse().unwrap(), poll_timeout).is_ok() {
+            chroma_ok = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if chroma_ok {
+        logs.push(String::from("[✓] ChromaDB is ONLINE"));
+    } else {
+        logs.push(String::from("[-] ChromaDB check timed out"));
+    }
+
+    // Wait for Hunter sidecar
+    let mut hunter_ok = false;
+    for _ in 0..15 {
+        if TcpStream::connect_timeout(&"127.0.0.1:50051".parse().unwrap(), poll_timeout).is_ok() {
+            hunter_ok = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if hunter_ok {
+        logs.push(String::from("[✓] Hunter Engine is ONLINE"));
+    } else {
+        logs.push(String::from("[-] Hunter check timed out"));
+    }
+
+    // Wait for RAG sidecar
+    let mut rag_ok = false;
+    for _ in 0..15 {
+        if TcpStream::connect_timeout(&"127.0.0.1:50052".parse().unwrap(), poll_timeout).is_ok() {
+            rag_ok = true;
+            break;
+        }
+        sleep(Duration::from_secs(2));
+    }
+    if rag_ok {
+        logs.push(String::from("[✓] RAG Engine is ONLINE"));
+    } else {
+        logs.push(String::from("[-] RAG check timed out"));
+    }
+
+    Ok(logs.join("\n"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
