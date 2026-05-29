@@ -76,7 +76,7 @@ class TokenBucketRateLimiter:
         Respects the ``SENTINEL_DEV_BYPASS_RATE_LIMIT`` env-var for
         development/testing.
         """
-        if os.environ.get("SENTINEL_DEV_BYPASS_RATE_LIMIT") == "true":
+        if os.environ.get("ENV") != "production" and os.environ.get("SENTINEL_DEV_BYPASS_RATE_LIMIT") == "true":
             logger.warning("[WARN] Rate limit bypassed due to SENTINEL_DEV_BYPASS_RATE_LIMIT=true")
             return
 

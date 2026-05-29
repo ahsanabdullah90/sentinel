@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import hunter_pb2 as hunter__pb2
+import health_pb2 as health__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
@@ -18,14 +18,14 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + ' but the generated code in hunter_pb2_grpc.py depends on'
+        + ' but the generated code in health_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class HunterServiceStub(object):
+class HealthStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -34,59 +34,59 @@ class HunterServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.Detect = channel.unary_stream(
-                '/hunter.HunterService/Detect',
-                request_serializer=hunter__pb2.DetectRequest.SerializeToString,
-                response_deserializer=hunter__pb2.DetectResponse.FromString,
+        self.Check = channel.unary_unary(
+                '/grpc.health.v1.Health/Check',
+                request_serializer=health__pb2.HealthCheckRequest.SerializeToString,
+                response_deserializer=health__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
-        self.Hunt = channel.unary_stream(
-                '/hunter.HunterService/Hunt',
-                request_serializer=hunter__pb2.HuntRequest.SerializeToString,
-                response_deserializer=hunter__pb2.HuntResponse.FromString,
+        self.Watch = channel.unary_stream(
+                '/grpc.health.v1.Health/Watch',
+                request_serializer=health__pb2.HealthCheckRequest.SerializeToString,
+                response_deserializer=health__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
 
 
-class HunterServiceServicer(object):
+class HealthServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def Detect(self, request, context):
+    def Check(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Hunt(self, request, context):
+    def Watch(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_HunterServiceServicer_to_server(servicer, server):
+def add_HealthServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'Detect': grpc.unary_stream_rpc_method_handler(
-                    servicer.Detect,
-                    request_deserializer=hunter__pb2.DetectRequest.FromString,
-                    response_serializer=hunter__pb2.DetectResponse.SerializeToString,
+            'Check': grpc.unary_unary_rpc_method_handler(
+                    servicer.Check,
+                    request_deserializer=health__pb2.HealthCheckRequest.FromString,
+                    response_serializer=health__pb2.HealthCheckResponse.SerializeToString,
             ),
-            'Hunt': grpc.unary_stream_rpc_method_handler(
-                    servicer.Hunt,
-                    request_deserializer=hunter__pb2.HuntRequest.FromString,
-                    response_serializer=hunter__pb2.HuntResponse.SerializeToString,
+            'Watch': grpc.unary_stream_rpc_method_handler(
+                    servicer.Watch,
+                    request_deserializer=health__pb2.HealthCheckRequest.FromString,
+                    response_serializer=health__pb2.HealthCheckResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'hunter.HunterService', rpc_method_handlers)
+            'grpc.health.v1.Health', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('hunter.HunterService', rpc_method_handlers)
+    server.add_registered_method_handlers('grpc.health.v1.Health', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class HunterService(object):
+class Health(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def Detect(request,
+    def Check(request,
             target,
             options=(),
             channel_credentials=None,
@@ -96,12 +96,12 @@ class HunterService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_stream(
+        return grpc.experimental.unary_unary(
             request,
             target,
-            '/hunter.HunterService/Detect',
-            hunter__pb2.DetectRequest.SerializeToString,
-            hunter__pb2.DetectResponse.FromString,
+            '/grpc.health.v1.Health/Check',
+            health__pb2.HealthCheckRequest.SerializeToString,
+            health__pb2.HealthCheckResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -113,7 +113,7 @@ class HunterService(object):
             _registered_method=True)
 
     @staticmethod
-    def Hunt(request,
+    def Watch(request,
             target,
             options=(),
             channel_credentials=None,
@@ -126,9 +126,9 @@ class HunterService(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/hunter.HunterService/Hunt',
-            hunter__pb2.HuntRequest.SerializeToString,
-            hunter__pb2.HuntResponse.FromString,
+            '/grpc.health.v1.Health/Watch',
+            health__pb2.HealthCheckRequest.SerializeToString,
+            health__pb2.HealthCheckResponse.FromString,
             options,
             channel_credentials,
             insecure,

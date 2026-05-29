@@ -86,30 +86,8 @@ async fn generate_vision_description(
 
 #[tauri::command]
 async fn extract_pdf_text_from_bytes(bytes: Vec<u8>) -> Result<String, String> {
-    use std::process::Command;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    // Create an OS-managed temporary file that gets auto-deleted when dropped
-    let mut temp_file = NamedTempFile::new().map_err(|e| e.to_string())?;
-    temp_file.write_all(&bytes).map_err(|e| e.to_string())?;
-    
-    let temp_path = temp_file.path();
-
-    // Extract text using pdftotext
-    let output = Command::new("pdftotext")
-        .arg(temp_path)
-        .arg("-")
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("pdftotext failed: {}", stderr));
-    }
-
-    let text = String::from_utf8_lossy(&output.stdout).into_owned();
-    Ok(text)
+    pdf_extract::extract_text_from_mem(&bytes)
+        .map_err(|e| format!("Failed to extract PDF text natively: {}", e))
 }
 
 #[tauri::command]
@@ -145,51 +123,39 @@ async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 async fn analyze_gaps(rfp_id: String) -> Result<Vec<serde_json::Value>, String> {
-    use std::process::Command;
-    use std::path::PathBuf;
-
-    let python_exec = if cfg!(windows) { "python.exe" } else { "python3" };
-    let mut script_path = PathBuf::from("sidecars/gap-engine/src_py/gap_engine.py");
-    if !script_path.exists() {
-        script_path = PathBuf::from("../sidecars/gap-engine/src_py/gap_engine.py");
+    // C-4: Validate/sanitize rfp_id via uuid::Uuid prior to executing commands in Tauri backend
+    if uuid::Uuid::parse_str(&rfp_id).is_err() {
+        return Err("Invalid rfp_id format. Must be a valid UUID.".to_string());
     }
 
-    if !script_path.exists() {
-        return Err("Gap Engine script not found".to_string());
+    let mut client = crate::ipc::get_gap_engine_client()
+        .await
+        .map_err(|e| format!("Failed to connect to Gap Engine gRPC service: {}", e))?;
+
+    let payload = crate::ipc::gap_engine::GapRequest {
+        rfp_id: rfp_id.clone(),
+    };
+    let request = crate::ipc::get_api_request(payload);
+
+    let response = client
+        .analyze_gaps(request)
+        .await
+        .map_err(|e| format!("Gap Engine gRPC execution failed: {}", e))?
+        .into_inner();
+
+    let mut list = Vec::new();
+    for gap in response.gaps {
+        list.push(serde_json::json!({
+            "area": gap.area,
+            "description": gap.description,
+        }));
     }
 
-    let output = Command::new(python_exec)
-        .arg(script_path)
-        .arg(&rfp_id)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(format!("Gap Engine execution failed: {}", err_msg));
-    }
-
-    let stdout_str = String::from_utf8_lossy(&output.stdout).to_string();
-    
-    // Find the JSON line in the stdout
-    for line in stdout_str.lines() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if let Some(event) = val.get("event").and_then(|e| e.as_str()) {
-                if event == "gap_report_generated" {
-                    if let Some(gaps) = val.get("data").and_then(|d| d.get("gaps")).and_then(|g| g.as_array()) {
-                        return Ok(gaps.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    Err("Failed to parse gaps from Gap Engine output".to_string())
+    Ok(list)
 }
 
 #[tauri::command]
 async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
-    use std::process::Command;
     use std::net::TcpStream;
     use std::time::Duration;
     use std::thread::sleep;
@@ -223,34 +189,22 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
         }
     }
 
-    // 1. Bring up Docker compose infrastructure securely and platform-independently
-    let mut compose_status = Command::new("docker")
-        .args(["compose", "up", "-d"])
-        .status();
-
-    if compose_status.is_err() {
-        // Fallback to older docker-compose command
-        compose_status = Command::new("docker-compose")
-            .args(["up", "-d"])
-            .status();
-    }
-
-    if let Err(e) = compose_status {
-        return Err(format!("Failed to bring up Docker infrastructure: {}", e));
-    }
-
-    // 2. Poll health natively via TcpStream socket checks to avoid calling external binaries (curl, nc)
+    // 1. We poll and verify all services running inside the Docker compose network or host-based sidecars.
+    // Decoupled docker compose lifecycle from Tauri boot runtime per C-9.
     let poll_timeout = Duration::from_secs(2);
     let mut logs = vec![String::from("Sentinel Bootstrapped Natively in Rust:")];
 
     // Wait for Ollama
+    let ollama_port = std::env::var("OLLAMA_PORT").unwrap_or_else(|_| "11434".to_string());
+    let ollama_addr_str = format!("127.0.0.1:{}", ollama_port);
+    let ollama_addr = ollama_addr_str.parse().unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap());
     let mut ollama_ok = false;
     for _ in 0..15 {
-        if TcpStream::connect_timeout(&"127.0.0.1:11434".parse().unwrap(), poll_timeout).is_ok() {
+        if TcpStream::connect_timeout(&ollama_addr, poll_timeout).is_ok() {
             ollama_ok = true;
             break;
         }
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(1));
     }
     if ollama_ok {
         logs.push(String::from("[✓] Ollama is ONLINE"));
@@ -265,7 +219,7 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
             chroma_ok = true;
             break;
         }
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(1));
     }
     if chroma_ok {
         logs.push(String::from("[✓] ChromaDB is ONLINE"));
@@ -280,7 +234,7 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
             hunter_ok = true;
             break;
         }
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(1));
     }
     if hunter_ok {
         logs.push(String::from("[✓] Hunter Engine is ONLINE"));
@@ -295,7 +249,7 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
             rag_ok = true;
             break;
         }
-        sleep(Duration::from_secs(2));
+        sleep(Duration::from_secs(1));
     }
     if rag_ok {
         logs.push(String::from("[✓] RAG Engine is ONLINE"));
@@ -303,12 +257,78 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
         logs.push(String::from("[-] RAG check timed out"));
     }
 
+    // Wait for Worker sidecar (port 50053)
+    let mut worker_ok = false;
+    for _ in 0..15 {
+        if TcpStream::connect_timeout(&"127.0.0.1:50053".parse().unwrap(), poll_timeout).is_ok() {
+            worker_ok = true;
+            break;
+        }
+        sleep(Duration::from_secs(1));
+    }
+    if worker_ok {
+        logs.push(String::from("[✓] Background Worker is ONLINE"));
+    } else {
+        logs.push(String::from("[-] Background Worker check timed out"));
+    }
+
+    // Wait for Gap Engine sidecar (port 50054)
+    let mut gap_ok = false;
+    for _ in 0..15 {
+        if TcpStream::connect_timeout(&"127.0.0.1:50054".parse().unwrap(), poll_timeout).is_ok() {
+            gap_ok = true;
+            break;
+        }
+        sleep(Duration::from_secs(1));
+    }
+    if gap_ok {
+        logs.push(String::from("[✓] Gap Engine is ONLINE"));
+    } else {
+        logs.push(String::from("[-] Gap Engine check timed out"));
+    }
+
     Ok(logs.join("\n"))
+}
+
+fn validate_env() {
+    if std::env::var("ENV").unwrap_or_default() == "production" {
+        let api_key = std::env::var("API_KEY");
+        let chroma_token = std::env::var("CHROMA_AUTH_TOKEN");
+        let redis_url = std::env::var("REDIS_URL");
+        
+        let mut missing = Vec::new();
+        if api_key.is_err() || api_key.unwrap().is_empty() {
+            missing.push("API_KEY");
+        }
+        if chroma_token.is_err() || chroma_token.unwrap().is_empty() {
+            missing.push("CHROMA_AUTH_TOKEN");
+        }
+        if redis_url.is_err() || redis_url.unwrap().is_empty() {
+            missing.push("REDIS_URL");
+        }
+        
+        if !missing.is_empty() {
+            panic!(
+                "CRITICAL ENVIRONMENT SCHEMA VALIDATION FAILURE: The following production variables are missing or empty: {:?}. Please configure them in your environment/.env file.",
+                missing
+            );
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    telemetry::init_telemetry();
+    validate_env();
+
+    // Securely initializes the async tracer inside a transient Tokio runtime context (Option 2)
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build telemetry runtime");
+    
+    rt.block_on(async {
+        telemetry::init_telemetry();
+    });
 
     tauri::Builder::default()
         .manage(crate::sidecar::HunterRegistry::new())
@@ -340,6 +360,21 @@ pub fn run() {
             commands::db_commands::finish_active_hunt,
             commands::db_commands::get_scheduler_timestamp,
             commands::db_commands::set_scheduler_timestamp,
+            commands::db_commands::delete_opportunity,
+            commands::db_commands::update_opportunity_status,
+            commands::db_commands::get_opportunity_detail,
+            commands::db_commands::get_attachments,
+            commands::db_commands::save_attachment,
+            commands::db_commands::delete_attachment,
+            commands::db_commands::update_attachment_text,
+            commands::db_commands::get_attachment_bytes,
+            commands::db_commands::get_proposal_drafts,
+            commands::db_commands::save_proposal_draft,
+            commands::db_commands::update_proposal_draft,
+            commands::db_commands::delete_proposal_draft,
+            commands::db_commands::get_knowledge_base,
+            commands::db_commands::save_knowledge_item,
+            commands::db_commands::delete_knowledge_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -14,8 +14,8 @@ import {
   Paperclip,
   Image,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
-import SqlDatabase from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
 
 interface Opportunity {
@@ -26,6 +26,9 @@ interface Opportunity {
   issuing_org?: string;
   downloaded_pdf_path?: string | null;
   status?: string;
+  url?: string | null;
+  portal_base_url?: string | null;
+  description?: string | null;
 }
 
 interface KnowledgeItem {
@@ -94,11 +97,7 @@ export function OpportunityDetail({
 
   async function loadAttachments(oppId: string) {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const result = await db.select<AttachmentItem[]>(
-        'SELECT id, opportunity_id, file_name, file_type, extracted_text, created_at FROM opportunity_attachments WHERE opportunity_id = ? ORDER BY created_at DESC',
-        [oppId]
-      );
+      const result = await invoke<AttachmentItem[]>('get_attachments', { oppId });
       setAttachments(result);
     } catch (err) {
       console.error('Failed to load attachments:', err);
@@ -115,27 +114,27 @@ export function OpportunityDetail({
         const arrayBuffer = event.target?.result as ArrayBuffer;
         const bytes = new Uint8Array(arrayBuffer);
 
-        const db = await SqlDatabase.load('sqlite:sentinel.db');
         const id = Math.random().toString(36).substring(2, 11);
 
-        const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
-        const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
-
         // 1. Save raw PDF bytes to database first
-        await db.execute(
-          'INSERT INTO opportunity_attachments (id, opportunity_id, file_name, file_type, file_bytes, extracted_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [id, opp.id, file.name, 'pdf', Array.from(bytes), null, timestamp]
-        );
+        await invoke('save_attachment', {
+          id,
+          oppId: opp.id,
+          fileName: file.name,
+          fileType: 'pdf',
+          fileSize: file.size,
+          fileBytes: Array.from(bytes),
+        });
 
         // 2. Extract text locally using pdftotext
         const text = await invoke<string>('extract_pdf_text_from_bytes', {
           bytes: Array.from(bytes),
         });
 
-        await db.execute('UPDATE opportunity_attachments SET extracted_text = ? WHERE id = ?', [
-          text,
+        await invoke('update_attachment_text', {
           id,
-        ]);
+          text,
+        });
 
         await loadAttachments(opp.id);
       } catch (err) {
@@ -157,17 +156,17 @@ export function OpportunityDetail({
         const arrayBuffer = event.target?.result as ArrayBuffer;
         const bytes = new Uint8Array(arrayBuffer);
 
-        const db = await SqlDatabase.load('sqlite:sentinel.db');
         const id = Math.random().toString(36).substring(2, 11);
 
-        const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
-        const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
-
         // 1. Save raw Image bytes to database first
-        await db.execute(
-          'INSERT INTO opportunity_attachments (id, opportunity_id, file_name, file_type, file_bytes, extracted_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [id, opp.id, file.name, 'image', Array.from(bytes), null, timestamp]
-        );
+        await invoke('save_attachment', {
+          id,
+          oppId: opp.id,
+          fileName: file.name,
+          fileType: 'image',
+          fileSize: file.size,
+          fileBytes: Array.from(bytes),
+        });
 
         // 2. Invoke local vision model via Ollama to generate a markdown description
         const description = await invoke<string>('generate_vision_description', {
@@ -176,10 +175,10 @@ export function OpportunityDetail({
           url: settings.ollamaUrl,
         });
 
-        await db.execute('UPDATE opportunity_attachments SET extracted_text = ? WHERE id = ?', [
-          description,
+        await invoke('update_attachment_text', {
           id,
-        ]);
+          text: description,
+        });
 
         await loadAttachments(opp.id);
       } catch (err) {
@@ -194,8 +193,7 @@ export function OpportunityDetail({
   async function handleDeleteAttachment(id: string) {
     if (!confirm('Are you sure you want to delete this attachment?')) return;
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('DELETE FROM opportunity_attachments WHERE id = ?', [id]);
+      await invoke('delete_attachment', { id });
       if (opp) {
         await loadAttachments(opp.id);
       }
@@ -213,14 +211,10 @@ export function OpportunityDetail({
   async function loadOpportunityDetails() {
     setLoading(true);
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const results = await db.select<any[]>(
-        'SELECT o.id, o.title, o.issuing_org, o.deadline_at as date, o.status, p.name as portal FROM opportunities o JOIN portals p ON o.portal_id = p.id WHERE o.id = ?',
-        [opportunityId]
-      );
-      if (results && results[0]) {
-        setOpp(results[0]);
-        setDraftTitle(`${results[0].title} Proposal Response`);
+      const result = await invoke<Opportunity | null>('get_opportunity_detail', { id: opportunityId });
+      if (result) {
+        setOpp(result);
+        setDraftTitle(`${result.title} Proposal Response`);
       } else {
         console.error('Opportunity not found:', opportunityId);
       }
@@ -233,10 +227,7 @@ export function OpportunityDetail({
 
   async function loadKbItems() {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const items = await db.select<KnowledgeItem[]>(
-        'SELECT id, title, content, type FROM knowledge_base'
-      );
+      const items = await invoke<KnowledgeItem[]>('get_knowledge_base');
       setKbItems(items);
       // Auto-select all available items by default
       setSelectedKbs(items.map((k) => k.id));
@@ -254,8 +245,7 @@ export function OpportunityDetail({
       return;
     }
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('DELETE FROM opportunities WHERE id = ?', [opportunityId]);
+      await invoke('delete_opportunity', { id: opportunityId });
       onRefresh();
       onBack();
     } catch (err) {
@@ -539,24 +529,21 @@ End of Auto-Generated Proposal Draft.`;
     if (!draftContent) return;
 
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
       const draftId = Math.random().toString(36).substring(2, 11);
 
-      // Calculate GMT+5 Local Time
-      const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
-      const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
-
       // 1. Insert into proposal_drafts
-      await db.execute(
-        'INSERT INTO proposal_drafts (id, opportunity_id, title, content, created_at) VALUES (?, ?, ?, ?, ?)',
-        [draftId, opportunityId, draftTitle, draftContent, timestamp]
-      );
+      await invoke('save_proposal_draft', {
+        id: draftId,
+        oppId: opportunityId,
+        title: draftTitle,
+        content: draftContent,
+      });
 
       // 2. Update opportunity status to drafted
-      await db.execute('UPDATE opportunities SET status = ? WHERE id = ?', [
-        'drafted',
-        opportunityId,
-      ]);
+      await invoke('update_opportunity_status', {
+        id: opportunityId,
+        status: 'drafted',
+      });
 
       onRefresh();
       onViewDrafts();
@@ -621,7 +608,7 @@ End of Auto-Generated Proposal Draft.`;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', textAlign: 'left' }}>
       {/* Back Header */}
-      <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button
           className="btn btn-ghost btn-sm"
           onClick={onBack}
@@ -629,6 +616,28 @@ End of Auto-Generated Proposal Draft.`;
         >
           <ArrowLeft size={14} /> Back to Hunt Dashboard
         </button>
+
+        {/* Go to Web Button */}
+        <a
+          href={opp.url || opp.portal_base_url || '#'}
+          target="_blank"
+          rel="noreferrer"
+          className="btn btn-sm btn-ghost"
+          style={{
+            display: 'inline-flex',
+            gap: '4px',
+            alignItems: 'center',
+            fontSize: '0.8rem',
+            textDecoration: 'none',
+            color: 'var(--accent-color)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '6px',
+            padding: '4px 10px',
+          }}
+        >
+          <ExternalLink size={14} />
+          Go to Web
+        </a>
       </div>
 
       <div
@@ -773,6 +782,26 @@ End of Auto-Generated Proposal Draft.`;
                   </span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Opportunity Description Card */}
+          {!isDrafting && opp.description && (
+            <div
+              className="card glass"
+              style={{
+                border: '1px solid rgba(255,255,255,0.06)',
+                margin: 0,
+                padding: '20px',
+                backgroundColor: '#111112',
+              }}
+            >
+              <h3 style={{ color: '#fff', fontSize: '1.1rem', margin: '0 0 12px 0', fontWeight: 600 }}>
+                Opportunity Overview
+              </h3>
+              <p style={{ color: '#c0c5d0', fontSize: '0.9rem', lineHeight: '1.6', margin: 0, whiteSpace: 'pre-wrap' }}>
+                {opp.description}
+              </p>
             </div>
           )}
 

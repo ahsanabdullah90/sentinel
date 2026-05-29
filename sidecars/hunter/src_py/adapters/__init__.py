@@ -4,9 +4,9 @@ Handles registration and dynamic resolution of site-specific portal adapters.
 """
 
 from typing import List
-from .base import PortalAdapter
-from .brightspyre import BrightspyreAdapter
-from .generic import GenericAdapter
+from sidecars.hunter.src_py.adapters.base import PortalAdapter
+from sidecars.hunter.src_py.adapters.brightspyre import BrightspyreAdapter
+from sidecars.hunter.src_py.adapters.generic import GenericAdapter
 
 # Order matters: site-specific adapters must come first, generic fallback last
 _REGISTRY: List[PortalAdapter] = [

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Search, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
-import SqlDatabase from '@tauri-apps/plugin-sql';
+import { X, Search, ChevronUp, ChevronDown, Sparkles, ExternalLink, Trash2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface Opportunity {
   id: string;
@@ -10,6 +10,9 @@ export interface Opportunity {
   issuing_org?: string;
   downloaded_pdf_path?: string | null;
   status?: string;
+  url?: string | null;
+  portal_base_url?: string | null;
+  description?: string | null;
 }
 
 interface Props {
@@ -91,8 +94,7 @@ export function OpportunitiesModal({
   // Handler to update status of an opportunity in the DB
   const handleStatusChange = async (oppId: string, newStatus: string) => {
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('UPDATE opportunities SET status = ? WHERE id = ?', [newStatus, oppId]);
+      await invoke('update_opportunity_status', { id: oppId, status: newStatus });
       onRefresh(); // reload parent data
     } catch (err) {
       console.error('Failed to update opportunity status:', err);
@@ -389,7 +391,7 @@ export function OpportunitiesModal({
                   >
                     <h3 style={{ color: '#fff', margin: 0, fontSize: '1rem' }}>{opp.title}</h3>
                     <span style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
-                      {opp.date || 'No Date'}
+                      Deadline: {opp.date || 'No Date'}
                     </span>
                   </div>
                   <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
@@ -398,6 +400,11 @@ export function OpportunitiesModal({
                   <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
                     <strong>Portal:</strong> {opp.portal}
                   </div>
+                  {opp.description && (
+                    <div style={{ color: '#c0c5d0', fontSize: '0.85rem', marginTop: '4px', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {opp.description}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <select
                       value={statusVal}
@@ -430,6 +437,23 @@ export function OpportunitiesModal({
                         Submitted
                       </option>
                     </select>
+                    <a
+                      href={opp.url || opp.portal_base_url || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-sm btn-ghost"
+                      style={{
+                        display: 'inline-flex',
+                        gap: '4px',
+                        alignItems: 'center',
+                        fontSize: '0.75rem',
+                        textDecoration: 'none',
+                        color: 'var(--accent-color)',
+                      }}
+                    >
+                      <ExternalLink size={12} />
+                      Go to Web
+                    </a>
                     <button
                       className="btn btn-sm btn-ghost"
                       onClick={() => {
@@ -447,6 +471,30 @@ export function OpportunitiesModal({
                     >
                       <Sparkles size={12} style={{ color: 'var(--accent-color)' }} />
                       Evaluate RFP
+                    </button>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={async () => {
+                        if (!confirm('Are you sure you want to delete this opportunity?')) return;
+                        try {
+                          await invoke('delete_opportunity', { id: opp.id });
+                          onRefresh();
+                        } catch (err) {
+                          console.error('Failed to delete opportunity:', err);
+                        }
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '4px',
+                        color: '#ff3b30',
+                        borderRadius: '6px',
+                        marginLeft: 'auto',
+                      }}
+                      title="Delete Opportunity"
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>

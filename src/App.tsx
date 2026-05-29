@@ -14,6 +14,7 @@ import {
   Trash2,
   Edit,
   Loader,
+  ExternalLink,
 } from 'lucide-react';
 import './App.css';
 import { GapReport } from './components/GapReport/GapReport';
@@ -25,6 +26,7 @@ import { OpportunityDetail } from './components/Opportunities/OpportunityDetail'
 import { ProposalDrafts } from './components/Drafts/ProposalDrafts';
 import { AppProvider, useAppContext } from './context/AppContext';
 import { Portal } from './types';
+import { invoke } from '@tauri-apps/api/core';
 
 function App() {
   const [currentView, setCurrentView] = useState<'hunt' | 'knowledge' | 'drafts' | 'opportunity-detail'>('hunt');
@@ -59,6 +61,16 @@ function App() {
     bootstrapEngines,
     checkOllama,
   } = useAppContext();
+
+  const handleDeleteOpportunity = async (oppId: string) => {
+    if (!confirm('Are you sure you want to delete this opportunity?')) return;
+    try {
+      await invoke('delete_opportunity', { id: oppId });
+      await loadOpportunities();
+    } catch (err) {
+      console.error('Failed to delete opportunity:', err);
+    }
+  };
 
   const memoizedPortals = useMemo(() => {
     return portals.map((p) => {
@@ -635,7 +647,7 @@ function App() {
                       <th style={{ width: '80px' }}>S.No.</th>
                       <th>Title</th>
                       <th>Portal</th>
-                      <th>Date</th>
+                      <th>Deadline</th>
                       <th style={{ textAlign: 'center' }}>Action</th>
                     </tr>
                   </thead>
@@ -677,22 +689,60 @@ function App() {
                           <td>{o.portal}</td>
                           <td>{o.date}</td>
                           <td style={{ textAlign: 'center' }}>
-                            <button
-                              className="btn btn-sm btn-ghost"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedOpportunityId(o.id);
-                                setCurrentView('opportunity-detail');
-                              }}
-                              style={{
-                                display: 'inline-flex',
-                                gap: '4px',
-                                alignItems: 'center',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-                              Evaluate RFP
-                            </button>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}>
+                              <button
+                                className="btn btn-sm btn-ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedOpportunityId(o.id);
+                                  setCurrentView('opportunity-detail');
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  gap: '4px',
+                                  alignItems: 'center',
+                                  fontSize: '0.75rem',
+                                }}
+                              >
+                                Evaluate RFP
+                              </button>
+                              <a
+                                href={o.url || o.portal_base_url || '#'}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn btn-sm btn-ghost"
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                  display: 'inline-flex',
+                                  gap: '4px',
+                                  alignItems: 'center',
+                                  fontSize: '0.75rem',
+                                  textDecoration: 'none',
+                                  color: 'var(--accent-color)',
+                                }}
+                              >
+                                <ExternalLink size={12} />
+                                Go to Web
+                              </a>
+                              <button
+                                className="btn btn-sm btn-ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleDeleteOpportunity(o.id);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  padding: '4px',
+                                  color: '#ff3b30',
+                                  borderRadius: '6px',
+                                }}
+                                title="Delete Opportunity"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))

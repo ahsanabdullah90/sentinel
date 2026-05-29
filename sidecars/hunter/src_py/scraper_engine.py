@@ -15,10 +15,10 @@ from urllib.parse import urlparse
 import urllib.request
 from playwright.async_api import async_playwright
 
-from .rate_limiter import TokenBucketRateLimiter
-from .utils.search_detector import detect_search_input
-from .adapters import resolve_adapter
-from .models import PortalConfig, RFPOpportunity, OllamaExtraction
+from sidecars.hunter.src_py.rate_limiter import TokenBucketRateLimiter
+from sidecars.hunter.src_py.utils.search_detector import detect_search_input
+from sidecars.hunter.src_py.adapters import resolve_adapter
+from sidecars.hunter.src_py.models import PortalConfig, RFPOpportunity, OllamaExtraction
 
 logger = logging.getLogger("hunter.scraper_engine")
 
@@ -60,6 +60,16 @@ class ProgressReporter:
         print(json.dumps({"event": "portal_detected", "data": event_data}), flush=True)
         if self.on_event:
             await self.on_event("portal_detected", event_data)
+
+    async def report_error(self, message: str) -> None:
+        """Report an execution error."""
+        event_data = {
+            "portalId": self.portal_id,
+            "message": message
+        }
+        print(json.dumps({"event": "error", **event_data}), flush=True)
+        if self.on_event:
+            await self.on_event("error", event_data)
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +272,8 @@ class GenericSearchStrategy(ScrapingStrategy):
 
                     except Exception as kw_err:
                         logger.error(f'Error processing keyword "{keyword}": {str(kw_err)}')
+                        await reporter.report_error(f"Error processing keyword '{keyword}': {str(kw_err)}")
+                        raise kw_err
                     finally:
                         await page.close()
             finally:
@@ -286,8 +298,33 @@ class GenericSearchStrategy(ScrapingStrategy):
         """Call local Ollama to extract opportunities from *cleaned_html*."""
         await reporter.report_progress(f"[{keyword}] Initiating local Ollama extraction...")
 
-        # Get local Ollama host, fallback to default if not configured
-        ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        # Determine Ollama URL (prioritize config.ollama_url, fallback to env)
+        ollama_url = config.ollama_url
+        if not ollama_url:
+            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+
+        # Smart Loopback translation if running in Docker
+        if os.environ.get("RUNNING_IN_DOCKER") == "true":
+            parsed_ollama = urlparse(ollama_url)
+            if parsed_ollama.hostname in ("localhost", "127.0.0.1", "host.docker.internal"):
+                # Read /proc/net/route to dynamically resolve the container's gateway IP
+                gateway_ip = "172.19.0.1"  # Default fallback
+                try:
+                    with open("/proc/net/route") as f:
+                        for line in f:
+                            fields = line.strip().split()
+                            if len(fields) >= 3 and fields[1] == "00000000":
+                                val = fields[2]
+                                ip_parts = [str(int(val[i:i+2], 16)) for i in range(6, -1, -2)]
+                                gateway_ip = ".".join(ip_parts)
+                                break
+                except Exception:
+                    pass
+                
+                netloc = gateway_ip
+                if parsed_ollama.port:
+                    netloc = f"{gateway_ip}:{parsed_ollama.port}"
+                ollama_url = parsed_ollama._replace(netloc=netloc).geturl()
 
         # 1. Fetch available models from Ollama
         available_models = []
@@ -303,11 +340,11 @@ class GenericSearchStrategy(ScrapingStrategy):
         if not available_models:
             raise RuntimeError(f"Ollama server at {ollama_url} has no models installed, or is unreachable. Please pull an LLM (e.g. gemma or qwen2.5-coder) before starting the hunt.")
 
-        # Determine target model: check settings/config or pick the first available local model
-        target_model = None
+        # Determine target model: check config settings, selector_config, env, or pick first available local model
+        target_model = config.ollama_model
         
         # Read from selector_config settings if present
-        if config.selector_config:
+        if not target_model and config.selector_config:
             try:
                 sel_data = json.loads(config.selector_config)
                 if sel_data.get("modelName"):
@@ -315,7 +352,7 @@ class GenericSearchStrategy(ScrapingStrategy):
             except Exception:
                 pass
 
-        # Fallback to general OLLAMA_MODEL environment variable or first available model
+        # Fallback to general OLLAMA_MODEL environment variable
         if not target_model:
             target_model = os.environ.get("OLLAMA_MODEL")
             
@@ -395,10 +432,10 @@ class GenericSearchStrategy(ScrapingStrategy):
                         if not is_json_refusal:
                             parsed = parsed_data
                             success = True
-                            await reporter.report_progress(f"[{keyword}] Ollama extraction completed successfully. Parsing response...")
         except Exception as model_err:
             logger.error(f"[{keyword}] Model extraction error: {str(model_err)}")
             await reporter.report_progress(f"[{keyword}] Ollama model extraction failed: {str(model_err)}")
+            raise RuntimeError(f"Ollama model extraction failed: {str(model_err)}") from model_err
 
         if success and parsed:
             items = []

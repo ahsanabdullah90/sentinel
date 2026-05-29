@@ -1,20 +1,40 @@
-FROM python:3.11-slim
+# Multi-stage build for RAG sidecar
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
 RUN pip install --no-cache-dir \
-    grpcio \
-    grpcio-tools \
-    "protobuf>=5.26.1" \
-    grpcio-health-checking
+    grpcio-tools==1.62.1 \
+    protobuf==4.25.3
 
-# Copy source code and proto
-COPY sidecars/rag/src_py ./sidecars/rag/src_py
-COPY proto ./proto
+COPY proto/ ./proto/
 
-# Patch generated proto files to bypass the protobuf runtime version check
-RUN sed -i '/ValidateProtobufRuntimeVersion/,/^)/d' proto/*_pb2.py && \
-    sed -i 's/from proto import/import/g' proto/*_pb2_grpc.py
+# Compile the protobuf definitions dynamically to match compiler exactly
+RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. proto/*.proto
+
+# Production runner image
+FROM python:3.11-slim AS runner
+
+WORKDIR /app
+
+# Create secure non-root user
+RUN groupadd -g 10001 appuser && \
+    useradd -u 10001 -g appuser -m -s /sbin/nologin appuser
+
+# Copy and install pinned requirements
+COPY sidecars/rag/requirements.txt ./sidecars/rag/
+RUN pip install --no-cache-dir -r sidecars/rag/requirements.txt
+
+# Copy generated proto files from builder stage
+COPY --from=builder --chown=appuser:appuser /app/proto ./proto
+
+# Copy sources with proper ownership
+COPY --chown=appuser:appuser sidecars/rag/src_py ./sidecars/rag/src_py
+
+# Set PYTHONPATH environment variable to resolve modules cleanly
+ENV PYTHONPATH="/app:/app/proto"
+
+USER appuser
 
 ENV PORT=50052
 EXPOSE 50052

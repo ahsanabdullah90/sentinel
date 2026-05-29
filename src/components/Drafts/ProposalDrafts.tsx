@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FileText, Calendar, Eye, Trash2, Edit3, X, Copy, Check, Save } from 'lucide-react';
-import SqlDatabase from '@tauri-apps/plugin-sql';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface ProposalDraft {
   id: string;
@@ -33,15 +33,7 @@ export function ProposalDrafts() {
   async function loadDrafts() {
     setLoading(true);
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const result = await db.select<ProposalDraft[]>(
-        `SELECT d.id, d.opportunity_id, d.title, d.content, d.created_at, 
-                o.title as opp_title, o.issuing_org as opp_org, p.name as opp_portal
-         FROM proposal_drafts d
-         LEFT JOIN opportunities o ON d.opportunity_id = o.id
-         LEFT JOIN portals p ON o.portal_id = p.id
-         ORDER BY d.created_at DESC`
-      );
+      const result = await invoke<ProposalDraft[]>('get_proposal_drafts');
       setDrafts(result);
     } catch (err) {
       console.error('Failed to load proposal drafts:', err);
@@ -57,8 +49,7 @@ export function ProposalDrafts() {
       return;
     }
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('DELETE FROM proposal_drafts WHERE id = ?', [id]);
+      await invoke('delete_proposal_draft', { id });
       void loadDrafts();
       if (activeDraft?.id === id) {
         setActiveDraft(null);
@@ -71,12 +62,11 @@ export function ProposalDrafts() {
   async function handleUpdateDraft() {
     if (!activeDraft) return;
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('UPDATE proposal_drafts SET title = ?, content = ? WHERE id = ?', [
-        editTitle,
-        editContent,
-        activeDraft.id,
-      ]);
+      await invoke('update_proposal_draft', {
+        id: activeDraft.id,
+        title: editTitle,
+        content: editContent,
+      });
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);

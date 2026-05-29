@@ -1,22 +1,66 @@
 services:
   ollama:
-    image: ollama/ollama:latest
-    ports:
-      - '${OLLAMA_PORT_MAP:-11435:11434}'
+    image: ollama/ollama:0.1.48
+    profiles:
+      - container-ollama
+    expose:
+      - "11434"
+    stop_grace_period: 30s
     volumes:
       - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4096M
+    networks:
+      - sentinel-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   chromadb:
-    image: chromadb/chroma:latest
-    ports:
-      - '8000:8000'
+    image: chromadb/chroma:0.5.0
+    # Port isolated - no host port exposed! (C-7)
+    expose:
+      - "8000"
+    stop_grace_period: 30s
     volumes:
       - chroma_data:/chroma/chroma
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2048M
+    networks:
+      - sentinel-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:latest
-    ports:
-      - '6379:6379'
+    image: redis:7.2.4-alpine
+    # Port isolated - no host port exposed! (C-7)
+    expose:
+      - "6379"
+    stop_grace_period: 30s
+    command: redis-server --requirepass sentinel-redis-secure-pass
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    networks:
+      - sentinel-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "sentinel-redis-secure-pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   hunter:
     build:
@@ -24,28 +68,57 @@ services:
       dockerfile: sidecars/hunter/Dockerfile
     ports:
       - '50051:50051'
+    stop_grace_period: 30s
     environment:
       - PORT=50051
+      - ENV=production
+      - API_KEY=sentinel-secret-api-key
+      - RUNNING_IN_DOCKER=true
+      - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2048M
+    networks:
+      - sentinel-net
     depends_on:
-      - ollama
+      jaeger:
+        condition: service_started
 
   rag:
     build:
       context: .
       dockerfile: sidecars/rag/Dockerfile
     ports:
-      - '50052:50051'
+      - '50052:50052'
+    stop_grace_period: 30s
     environment:
-      - PORT=50051
+      - PORT=50052
+      - ENV=production
+      - API_KEY=sentinel-secret-api-key
+      - RUNNING_IN_DOCKER=true
       - CHROMA_URL=http://chromadb:8000
+      - CHROMA_AUTH_TOKEN=sentinel-chroma-bearer-token
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2048M
+    networks:
+      - sentinel-net
     depends_on:
-      - chromadb
-      - ollama
+      chromadb:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
 
   worker:
     build:
@@ -53,18 +126,69 @@ services:
       dockerfile: sidecars/worker/Dockerfile
     ports:
       - '50053:50053'
+    stop_grace_period: 30s
     environment:
       - PORT=50053
-      - REDIS_URL=redis://redis:6379
+      - ENV=production
+      - API_KEY=sentinel-secret-api-key
+      - RUNNING_IN_DOCKER=true
+      - REDIS_URL=redis://:sentinel-redis-secure-pass@redis:6379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+    networks:
+      - sentinel-net
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
 
   gap-engine:
     build:
       context: .
       dockerfile: sidecars/gap-engine/Dockerfile
+    ports:
+      - '50054:50054'
+    stop_grace_period: 30s
     environment:
+      - PORT=50054
+      - ENV=production
+      - API_KEY=sentinel-secret-api-key
+      - RUNNING_IN_DOCKER=true
       - PYTHONUNBUFFERED=1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+    networks:
+      - sentinel-net
+    depends_on:
+      jaeger:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+    networks:
+      - sentinel-net
+
+networks:
+  sentinel-net:
+    driver: bridge
 
 volumes:
   ollama_data:

@@ -29,3 +29,9 @@ dist-ssr
 __pycache__/
 *.pyc
 
+# Local scratch / test files
+sidecars/hunter/scratch_hunt.py
+test_grpc_client.py
+*.db
+
+

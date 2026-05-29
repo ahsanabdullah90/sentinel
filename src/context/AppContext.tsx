@@ -148,7 +148,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       startTimeRef.current = Date.now();
 
       const portal = portals.find(p => p.id === portalId);
-      const id = await invoke('start_hunt_session', { portalId, config: JSON.stringify(portal) });
+      const portalWithSettings = portal ? {
+        ...portal,
+        ollamaUrl: settings.ollamaUrl,
+        ollamaModel: settings.ollamaModel,
+      } : null;
+      const id = await invoke('start_hunt_session', { portalId, config: JSON.stringify(portalWithSettings) });
       setSessionId(id as string);
     } catch (error) {
       console.error('Failed to start hunt:', error);
@@ -247,9 +252,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           if (portal) {
             setHunting(true);
             startTimeRef.current = Date.now();
+            const portalWithSettings = {
+              ...portal,
+              ollamaUrl: settings.ollamaUrl,
+              ollamaModel: settings.ollamaModel,
+            };
             const id = await invoke('start_hunt_session', {
               portalId: nextPortalId,
-              config: JSON.stringify(portal),
+              config: JSON.stringify(portalWithSettings),
             });
             setSessionId(id as string);
           } else {

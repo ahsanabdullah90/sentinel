@@ -1,5 +1,5 @@
 import pytest
-from src_py.utils.search_detector import detect_search_input
+from sidecars.hunter.src_py.utils.search_detector import detect_search_input
 
 class MockPage:
     def __init__(self, js_result):

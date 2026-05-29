@@ -18,6 +18,8 @@ class PortalConfig(BaseModel):
     requests_per_minute: int = Field(default=15, alias="requestsPerMinute")
     keywords: Optional[str] = None
     selector_config: Optional[str] = Field(default=None, alias="selectorConfig")
+    ollama_url: Optional[str] = Field(default=None, alias="ollamaUrl")
+    ollama_model: Optional[str] = Field(default=None, alias="ollamaModel")
 
     model_config = ConfigDict(populate_by_name=True)
 

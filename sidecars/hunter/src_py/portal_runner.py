@@ -8,9 +8,9 @@ appropriate ``ScrapingStrategy``.
 import json
 import logging
 from typing import Dict, Optional, Callable, Any, Awaitable
-from .rate_limiter import TokenBucketRateLimiter
-from .scraper_engine import get_strategy, ProgressReporter
-from .models import PortalConfig
+from sidecars.hunter.src_py.rate_limiter import TokenBucketRateLimiter
+from sidecars.hunter.src_py.scraper_engine import get_strategy, ProgressReporter
+from sidecars.hunter.src_py.models import PortalConfig
 
 logger = logging.getLogger("hunter.portal_runner")
 

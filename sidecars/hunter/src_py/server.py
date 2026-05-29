@@ -9,21 +9,92 @@ import logging
 import os
 import sys
 import json
+import signal
 import grpc
 
-# Add the proto folder to search path so pb2 packages import cleanly
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../proto")))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+
 
 import hunter_pb2
 import hunter_pb2_grpc
 
-from .portal_analyzer import analyze_portal
-from .portal_runner import PortalRunner
-from .models import PortalConfig
+from sidecars.hunter.src_py.portal_analyzer import analyze_portal
+from sidecars.hunter.src_py.portal_runner import PortalRunner
+from sidecars.hunter.src_py.models import PortalConfig
 
-logging.basicConfig(level=logging.INFO)
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "module": record.module,
+            "message": record.getMessage()
+        }
+        if record.exc_info:
+            log_record["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(log_record)
+
+
+class AuthInterceptor(grpc.aio.ServerInterceptor):
+    def __init__(self, expected_token: str):
+        self._expected_token = expected_token
+
+    async def intercept_service(self, continuation, handler_call_details):
+        if os.environ.get("ENV") == "production":
+            metadata = dict(handler_call_details.invocation_metadata)
+            token = metadata.get("x-sentinel-token") or metadata.get("authorization")
+            if token != self._expected_token:
+                async def abort_call(request, context):
+                    await context.abort(
+                        grpc.StatusCode.UNAUTHENTICATED,
+                        "Missing or invalid Sentinel API token"
+                    )
+                return grpc.unary_unary_rpc_method_handler(abort_call)
+        return await continuation(handler_call_details)
+
+
+def setup_telemetry(service_name: str):
+    """Bootstrap OpenTelemetry Tracing to OTLP collector."""
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
+        
+        resource = Resource.create(attributes={"service.name": service_name})
+        provider = TracerProvider(resource=resource)
+        otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+        exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+        span_processor = BatchSpanProcessor(exporter)
+        provider.add_span_processor(span_processor)
+        trace.set_tracer_provider(provider)
+        logger.info(f"OpenTelemetry tracing initialized for service: {service_name} pointing to {otlp_endpoint}")
+    except Exception as e:
+        logger.warning(f"OpenTelemetry tracing could not be initialized (running without distributed tracing): {str(e)}")
+
+
+class TracingServerInterceptor(grpc.aio.ServerInterceptor):
+    async def intercept_service(self, continuation, handler_call_details):
+        try:
+            from opentelemetry import trace
+            tracer = trace.get_tracer("sentinel.grpc")
+            method = handler_call_details.method
+            with tracer.start_as_current_span(f"gRPC {method}") as span:
+                span.set_attribute("rpc.system", "grpc")
+                span.set_attribute("rpc.method", method)
+                return await continuation(handler_call_details)
+        except Exception:
+            return await continuation(handler_call_details)
+
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter())
 logger = logging.getLogger("hunter.server")
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+logger.propagate = False
+
 
 
 class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
@@ -184,7 +255,13 @@ class HunterServiceServicer(hunter_pb2_grpc.HunterServiceServicer):
 
 async def serve():
     """Start the Hunter gRPC server."""
-    server = grpc.aio.server()
+    setup_telemetry("hunter-sidecar")
+    interceptors = [TracingServerInterceptor()]
+    if os.environ.get("ENV") == "production":
+        api_key = os.environ.get("API_KEY", "sentinel-secret-api-key")
+        interceptors.append(AuthInterceptor(api_key))
+
+    server = grpc.aio.server(interceptors=interceptors)
     hunter_pb2_grpc.add_HunterServiceServicer_to_server(
         HunterServiceServicer(), server
     )
@@ -196,9 +273,31 @@ async def serve():
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     port = os.environ.get("PORT", "50051")
-    bind_address = f"0.0.0.0:{port}"
-    server.add_insecure_port(bind_address)
-    logger.info(f"Hunter gRPC Server starting on bind address: {bind_address}")
+    host = "0.0.0.0" if os.environ.get("RUNNING_IN_DOCKER") == "true" else "127.0.0.1"
+    bind_address = f"{host}:{port}"
+    
+    # Secure port binding in production (localhost loopback via Local TCP) unless running inside Docker
+    if os.environ.get("ENV") == "production" and os.environ.get("RUNNING_IN_DOCKER") != "true":
+        server_credentials = grpc.local_server_credentials(grpc.LocalConnectionType.LOCAL_TCP)
+        server.add_secure_port(bind_address, server_credentials)
+        logger.info(f"Hunter gRPC Server starting with Secure Local TCP credentials on {bind_address}")
+    else:
+        server.add_insecure_port(bind_address)
+        logger.info(f"Hunter gRPC Server starting on bind address: {bind_address} (INSECURE)")
+
+    loop = asyncio.get_running_loop()
+    async def shutdown():
+        logger.info("SIGTERM received, stopping Hunter gRPC server gracefully...")
+        await server.stop(5)
+        logger.info("Hunter gRPC server stopped.")
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+        except NotImplementedError:
+            # Handle platform limitations (e.g. Windows)
+            pass
+
     await server.start()
     await server.wait_for_termination()
 

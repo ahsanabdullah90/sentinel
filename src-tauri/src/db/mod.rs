@@ -87,6 +87,27 @@ pub fn init() -> Vec<Migration> {
                     value TEXT NOT NULL
                   );",
             kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 9,
+            description: "add_url_to_opportunities",
+            sql: "ALTER TABLE opportunities ADD COLUMN url TEXT;",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "purge_and_add_description_to_opportunities",
+            sql: "DELETE FROM opportunities;
+                  ALTER TABLE opportunities ADD COLUMN description TEXT;",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 11,
+            description: "add_attachment_size_and_draft_updated_at",
+            sql: "ALTER TABLE opportunity_attachments ADD COLUMN file_size INTEGER;
+                  ALTER TABLE proposal_drafts ADD COLUMN updated_at TEXT;
+                  UPDATE portals SET opportunities_count = 0;",
+            kind: MigrationKind::Up,
         }
     ]
 }

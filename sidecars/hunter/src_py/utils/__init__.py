@@ -1,3 +1,3 @@
 """Hunter Python Utilities Package
 """
-from .search_detector import detect_search_input
+from sidecars.hunter.src_py.utils.search_detector import detect_search_input

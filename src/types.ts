@@ -21,4 +21,7 @@ export interface Opportunity {
   issuing_org?: string;
   downloaded_pdf_path?: string | null;
   status?: string;
+  url?: string | null;
+  portal_base_url?: string | null;
+  description?: string | null;
 }

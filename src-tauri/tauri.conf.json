@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:11434 http://localhost:8000"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' http://localhost:11434 http://localhost:8000"
     }
   },
   "bundle": {
@@ -36,9 +36,7 @@
   },
   "plugins": {
     "updater": {
-      "active": true,
-      "endpoints": ["https://example.com/updates/{{target}}-{{arch}}.json"],
-      "pubkey": "YOUR_UPDATER_PUBLIC_KEY"
+      "active": false
     }
   }
 }

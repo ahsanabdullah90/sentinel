@@ -71,15 +71,16 @@ sidecars/hunter/
 ## ⚡ CLI & Test Execution
 
 ### Direct Execution
-Start the gRPC server:
+Start the gRPC server from the workspace root directory:
 ```bash
-python3 src_py/server.py
+# Add workspace root and proto to PYTHONPATH
+PYTHONPATH=.:./proto python3 sidecars/hunter/src_py/server.py
 ```
 
 ### Script Execution (CLI mode)
-Run the CLI search directly:
+Run the CLI search directly from the workspace root directory:
 ```bash
-python3 src_py/scraper_engine.py --portal brightspyre --query "software" --limit 5
+PYTHONPATH=.:./proto python3 sidecars/hunter/src_py/scraper_engine.py --portal brightspyre --query "software" --limit 5
 ```
 
 ---

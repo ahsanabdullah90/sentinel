@@ -3,7 +3,7 @@
 Implements default fallback routing behavior for any unadapted portal.
 """
 
-from .base import PortalAdapter
+from sidecars.hunter.src_py.adapters.base import PortalAdapter
 
 class GenericAdapter(PortalAdapter):
     """Fallback portal adapter that relies on visual heuristics and search form submissions."""

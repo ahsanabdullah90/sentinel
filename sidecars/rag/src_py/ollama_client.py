@@ -13,6 +13,7 @@ import json
 import logging
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 logger = logging.getLogger("rag.ollama_client")
 
@@ -21,7 +22,18 @@ class OllamaClient:
     """Lightweight async Ollama client using ``urllib``."""
 
     def __init__(self):
-        self.base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        
+        # Smart Loopback translation if running in Docker
+        if os.environ.get("RUNNING_IN_DOCKER") == "true":
+            parsed_ollama = urlparse(base_url)
+            if parsed_ollama.hostname in ("localhost", "127.0.0.1"):
+                netloc = "host.docker.internal"
+                if parsed_ollama.port:
+                    netloc = f"host.docker.internal:{parsed_ollama.port}"
+                base_url = parsed_ollama._replace(netloc=netloc).geturl()
+
+        self.base_url = base_url
         logger.info(f"Initialized OllamaClient pointing to: {self.base_url}")
 
     async def check_health(self) -> bool:

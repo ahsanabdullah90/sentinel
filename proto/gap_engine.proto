@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package gap_engine;
+
+service GapEngineService {
+  rpc AnalyzeGaps (GapRequest) returns (GapResponse);
+}
+
+message GapRequest {
+  string rfp_id = 1;
+}
+
+message Gap {
+  string area = 1;
+  string description = 2;
+}
+
+message GapResponse {
+  string rfp_id = 1;
+  repeated Gap gaps = 2;
+}

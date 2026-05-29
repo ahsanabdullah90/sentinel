@@ -4,7 +4,7 @@ Implements portal-specific adapter rules for Brightspyre.
 """
 
 from urllib.parse import quote
-from .base import PortalAdapter
+from sidecars.hunter.src_py.adapters.base import PortalAdapter
 
 class BrightspyreAdapter(PortalAdapter):
     """Portal adapter for the Brightspyre job portal."""

@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS opportunities (
   title TEXT NOT NULL,
   issuing_org TEXT NOT NULL,
   deadline_at TEXT NOT NULL,
+  url TEXT,
+  description TEXT,
   downloaded_pdf_path TEXT,
   status TEXT NOT NULL DEFAULT 'discovered'
     CHECK(status IN ('discovered','downloaded','ingested','drafted','submitted')),

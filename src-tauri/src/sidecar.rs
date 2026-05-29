@@ -245,11 +245,88 @@ pub async fn ensure_hunter_grpc_server_running(app: AppHandle) -> Result<(), cra
     info!("Resolved Python server script path to: {}", script_path);
 
     let registry = app.state::<HunterRegistry>();
-    
-    // Launch Python server with dynamic PORT environment variable
-    let cmd = app.shell().command("python3")
+
+    // --- Failproof PYTHONPATH construction ---
+    //
+    // PROBLEM: std::env::current_dir() returns the Rust binary's cwd, which during
+    // `tauri dev` is `src-tauri/` — NOT the workspace root. Building PYTHONPATH from
+    // that gives wrong paths like `src-tauri/proto/` which does not exist.
+    //
+    // SOLUTION: Derive the workspace root from the *resolved* script_path, which
+    // find_python_script() guarantees is an absolute path. The path structure is:
+    //   <workspace>/sidecars/hunter/src_py/server.py
+    // So the workspace root is exactly 4 parent levels up from server.py.
+    // This is deterministic regardless of cwd, launch context, or OS.
+    //
+    // FALLBACK CHAIN (in order of preference):
+    //   1. Workspace root derived from script path (primary — works in dev & CI)
+    //   2. std::env::current_dir() parent traversal (secondary — handles edge cases)
+    //   3. App resource_dir (tertiary — for packaged/bundled builds)
+    let python_path: String = {
+        // Strategy 1: Walk 4 parents up from server.py -> workspace root
+        let workspace_from_script = std::path::Path::new(&script_path)
+            .parent()               // .../src_py/
+            .and_then(|p| p.parent()) // .../hunter/
+            .and_then(|p| p.parent()) // .../sidecars/
+            .and_then(|p| p.parent()) // .../sentinel/ (workspace root)
+            .map(|p| p.to_path_buf());
+
+        if let Some(workspace) = workspace_from_script {
+            let proto = workspace.join("proto");
+            if proto.exists() {
+                let path = format!("{}:{}", workspace.display(), proto.display());
+                info!("PYTHONPATH (from script path): {}", path);
+                path
+            } else {
+                // proto dir not adjacent to workspace root (edge case: packaged build layout)
+                let path = workspace.display().to_string();
+                info!("PYTHONPATH (workspace only, no proto adjacent): {}", path);
+                path
+            }
+        } else {
+            // Strategy 2: Walk current_dir() tree upward searching for sidecars/hunter
+            let fallback = std::env::current_dir().ok().and_then(|mut dir| {
+                loop {
+                    if dir.join("sidecars").join("hunter").exists() {
+                        let proto = dir.join("proto");
+                        let p = if proto.exists() {
+                            format!("{}:{}", dir.display(), proto.display())
+                        } else {
+                            dir.display().to_string()
+                        };
+                        return Some(p);
+                    }
+                    match dir.parent() {
+                        Some(parent) => dir = parent.to_path_buf(),
+                        None => break,
+                    }
+                }
+                None
+            });
+
+            // Strategy 3: App resource_dir (packaged bundles)
+            let resource_fallback = app.path().resource_dir().ok().map(|d| d.display().to_string());
+
+            let path = fallback
+                .or(resource_fallback)
+                .unwrap_or_default();
+            if !path.is_empty() {
+                info!("PYTHONPATH (fallback): {}", path);
+            } else {
+                warn!("Could not determine PYTHONPATH — imports may fail.");
+            }
+            path
+        }
+    };
+
+    // Launch Python server with dynamic PORT and PYTHONPATH environment variables
+    let mut cmd = app.shell().command("python3")
         .args(vec![script_path])
         .env("PORT", port.to_string());
+
+    if !python_path.is_empty() {
+        cmd = cmd.env("PYTHONPATH", python_path);
+    }
 
     let (mut rx, child) = match cmd.spawn() {
         Ok(res) => res,
@@ -313,10 +390,22 @@ pub async fn execute_grpc_hunt(
     // 1. Ensure server is active
     ensure_hunter_grpc_server_running(app.clone()).await?;
 
-    // 2. Setup Tonic connection
+    // 2. Setup Tonic connection with timeouts
     let hunter_port = crate::ipc::HUNTER_PORT.load(std::sync::atomic::Ordering::SeqCst);
-    let mut client = match HunterServiceClient::connect(format!("http://127.0.0.1:{}", hunter_port)).await {
-        Ok(c) => c,
+    let endpoint = match tonic::transport::Endpoint::from_shared(format!("http://127.0.0.1:{}", hunter_port)) {
+        Ok(ep) => ep
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(120)), // Maximum 2 minutes for the entire hunt lifecycle
+        Err(e) => {
+            error!("Failed to construct Hunter gRPC endpoint: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "Failed to construct Hunter gRPC endpoint: {}", e
+            )));
+        }
+    };
+
+    let channel = match endpoint.connect().await {
+        Ok(ch) => ch,
         Err(e) => {
             error!("Failed to connect to Hunter gRPC service: {}", e);
             return Err(crate::errors::SentinelError::Sidecar(format!(
@@ -324,6 +413,8 @@ pub async fn execute_grpc_hunt(
             )));
         }
     };
+
+    let mut client = HunterServiceClient::new(channel);
 
     // 3. Create active cancellation channel
     let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
@@ -334,10 +425,10 @@ pub async fn execute_grpc_hunt(
     }
 
     // 4. Request the Hunt stream
-    let request = HuntRequest {
+    let request = crate::ipc::get_api_request(HuntRequest {
         portal_id: portal_id.clone(),
         mock_config_json: config_json,
-    };
+    });
 
     let mut stream = match client.hunt(request).await {
         Ok(response) => response.into_inner(),
@@ -359,19 +450,23 @@ pub async fn execute_grpc_hunt(
                 info!("Hunt session {} was cancelled by user.", session_id_clone);
             }
             _res = async {
-                while let Some(message) = stream.message().await.ok().flatten() {
-                    let event_name = format!("sentinel://hunter/{}", message.event.replace('_', "-"));
-                    
-                    let payload_value = if message.payload_type == 0 { // PayloadType::Json
-                        serde_json::from_str::<serde_json::Value>(&message.json_payload)
-                            .unwrap_or_else(|_| serde_json::Value::String(message.json_payload.clone()))
-                    } else {
-                        serde_json::Value::String(message.json_payload.clone())
-                    };
+                loop {
+                    match stream.message().await {
+                        Ok(Some(message)) => {
+                            let event_name = format!("sentinel://hunter/{}", message.event.replace('_', "-"));
+                            
+                            let payload_value = if message.payload_type == 0 { // PayloadType::Json
+                                serde_json::from_str::<serde_json::Value>(&message.json_payload)
+                                    .unwrap_or_else(|_| serde_json::Value::String(message.json_payload.clone()))
+                            } else {
+                                serde_json::Value::String(message.json_payload.clone())
+                            };
+                            
+                            info!("Received from gRPC stream: {} -> {}", event_name, payload_value);
 
-                    // Auto-persist to SQLite on Rust side
-                    if message.event == "opportunity_found" {
-                        if let Ok(opp) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
+                            // Auto-persist to SQLite on Rust side
+                            if message.event == "opportunity_found" {
+                                if let Ok(opp) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
                             let opp_id = opp.get("id").and_then(|v| v.as_str()).map(|s| s.to_string())
                                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                             let portal_id = opp.get("portalId").and_then(|v| v.as_str()).map(|s| s.to_string())
@@ -381,6 +476,8 @@ pub async fn execute_grpc_hunt(
                                 .unwrap_or_else(|| "Unknown Agency".to_string());
                             let due_date = opp.get("dueDate").and_then(|v| v.as_str()).map(|s| s.to_string())
                                 .unwrap_or_else(|| "2026-06-30".to_string());
+                            let url = opp.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
+                            let description = opp.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                             
                             if let Err(e) = crate::db::queries::record_opportunity(
                                 &app_clone,
@@ -389,19 +486,32 @@ pub async fn execute_grpc_hunt(
                                 title,
                                 agency,
                                 due_date,
+                                url,
+                                description,
                             ) {
                                 error!("Failed to auto-persist opportunity to SQLite in Rust: {}", e);
                             }
                         }
                     }
 
-                    if let Err(e) = app_clone.emit(&event_name, payload_value) {
-                        error!("Failed to emit hunt event {}: {}", event_name, e);
+                            if let Err(e) = app_clone.emit(&event_name, payload_value) {
+                                error!("Failed to emit hunt event {}: {}", event_name, e);
+                            }
+                        }
+                        Ok(None) => {
+                            info!("Hunt stream ended naturally for session {}", session_id_clone);
+                            break;
+                        }
+                        Err(e) => {
+                            error!("Hunt stream error for session {}: {:?}", session_id_clone, e);
+                            let _ = app_clone.emit("sentinel://hunter/error", serde_json::json!({
+                                "message": format!("gRPC Stream Error: {}", e)
+                            }));
+                            break;
+                        }
                     }
                 }
-            } => {
-                info!("gRPC Hunt stream completed for session {}.", session_id_clone);
-            }
+            } => {}
         }
 
         // Clean up registry entry when done
@@ -421,8 +531,20 @@ pub async fn execute_grpc_detect(
     ensure_hunter_grpc_server_running(app.clone()).await?;
 
     let hunter_port = crate::ipc::HUNTER_PORT.load(std::sync::atomic::Ordering::SeqCst);
-    let mut client = match HunterServiceClient::connect(format!("http://127.0.0.1:{}", hunter_port)).await {
-        Ok(c) => c,
+    let endpoint = match tonic::transport::Endpoint::from_shared(format!("http://127.0.0.1:{}", hunter_port)) {
+        Ok(ep) => ep
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(60)), // Maximum 60 seconds for portal detection
+        Err(e) => {
+            error!("Failed to construct Hunter gRPC endpoint for detect: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "Failed to construct Hunter gRPC endpoint: {}", e
+            )));
+        }
+    };
+
+    let channel = match endpoint.connect().await {
+        Ok(ch) => ch,
         Err(e) => {
             error!("Failed to connect to Hunter gRPC service for detect: {}", e);
             return Err(crate::errors::SentinelError::Sidecar(format!(
@@ -431,7 +553,9 @@ pub async fn execute_grpc_detect(
         }
     };
 
-    let request = DetectRequest { url };
+    let mut client = HunterServiceClient::new(channel);
+
+    let request = crate::ipc::get_api_request(DetectRequest { url });
     let mut stream = match client.detect(request).await {
         Ok(response) => response.into_inner(),
         Err(e) => {

@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Image,
 } from 'lucide-react';
-import SqlDatabase from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface KnowledgeItem {
@@ -110,10 +109,7 @@ useEffect(() => {
   async function loadKnowledgeItems() {
     setLoading(true);
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      const result = await db.select<KnowledgeItem[]>(
-        'SELECT * FROM knowledge_base ORDER BY created_at DESC'
-      );
+      const result = await invoke<KnowledgeItem[]>('get_knowledge_base');
       setItems(result);
     } catch (err) {
       console.error('Failed to load knowledge base items:', err);
@@ -160,26 +156,17 @@ useEffect(() => {
     if (!newTitle.trim() || !newContent.trim()) return;
 
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
       const id = Math.random().toString(36).substring(2, 11);
-
-      // Calculate GMT+5 Local Time for timestamp
-      const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
-      const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
-
-      await db.execute(
-        'INSERT INTO knowledge_base (id, title, content, type, tags, file_name, file_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [
-          id,
-          newTitle.trim(),
-          newContent.trim(),
-          newType,
-          newTags.trim(),
-          attachedFileName || null,
-          attachedFileBytes || null,
-          timestamp,
-        ]
-      );
+      // Note: Backend automatically generates timestamp on insert, so we don't need to pass it
+      await invoke('save_knowledge_item', {
+        id,
+        title: newTitle.trim(),
+        content: newContent.trim(),
+        itemType: newType,
+        tags: newTags.trim() || null,
+        fileName: attachedFileName || null,
+        fileBytes: attachedFileBytes ? Array.from(attachedFileBytes) : null,
+      });
 
       // Reset form
       setNewTitle('');
@@ -205,8 +192,7 @@ useEffect(() => {
       return;
     }
     try {
-      const db = await SqlDatabase.load('sqlite:sentinel.db');
-      await db.execute('DELETE FROM knowledge_base WHERE id = ?', [id]);
+      await invoke('delete_knowledge_item', { id });
       void loadKnowledgeItems();
       if (previewItem?.id === id) {
         setPreviewItem(null);
