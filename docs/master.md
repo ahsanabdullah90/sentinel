@@ -68,10 +68,21 @@ Two hard gates that **must never be auto-bypassed**:
 
 ## 2. Architecture Principles
 
-### 2.1 Sidecar Communication Protocol
+### 2.1 Sidecar Communication Protocols
 
-All sidecars (hunter, rag, gap-engine) communicate with the Rust host via a strict
-JSON-lines protocol:
+The application uses two protocols for communicating between the Rust Tauri core and individual sidecars based on performance and streaming needs:
+
+#### A. Hunter Sidecar (gRPC Stream Protocol)
+The Hunter sidecar is built in Python and runs a high-performance gRPC server on `localhost:50051`. 
+- **Start / Trigger**: Rust core invokes gRPC client streams (`Hunt` / `Detect`).
+- **Cancellation**: Rust drops the connection handle, triggering a clean Python `asyncio.CancelledError` which stops the active Playwright browser process immediately.
+- **Event Flow**:
+  - `progress` events → Rust maps to `sentinel://hunter/progress`
+  - `opportunity_found` events → Rust maps to `sentinel://hunter/opportunity-found`
+  - `portal_detected` events → Rust maps to `sentinel://hunter/portal-detected`
+
+#### B. RAG & Gap-Engine Sidecars (JSON-Lines Protocol)
+Other Node.js-based sidecars communicate via standard stdout JSON-lines parsed in real-time by the Rust sidecar spawner:
 
 **Stdout** (sidecar → Rust → frontend events):
 
@@ -98,9 +109,6 @@ JSON-lines protocol:
 Rust parses stdout → emits Tauri events with the prefix `sentinel://`:
 
 ```
-sentinel://hunt/opportunity-found
-sentinel://hunt/hitl-required
-sentinel://hunt/error
 sentinel://system/ollama-status
 sentinel://system/chroma-status
 sentinel://ingest/progress
@@ -153,15 +161,14 @@ No error is swallowed silently at any layer.
 | Tauri events                  | `sentinel://domain/kebab-event`                        | `sentinel://hunt/opportunity-found` |
 | Tauri commands                | `snake_case` (Rust)                                    | `start_hunt_session`                |
 | React components              | `PascalCase` files                                     | `OpportunityRow.tsx`                |
-| Zustand stores                | `camelCase` + `Store` suffix                           | `opportunityStore`                  |
+| React Context                 | `use` + Context Name + `Context`                        | `useAppContext`                     |
 | CSS classes                   | Tailwind utilities only; no custom class proliferation | —                                   |
 
 ### 3.2 File Organisation Rules
 
 - One component per file. No barrel exports that re-export implementation details.
-- Zustand stores live in `src/stores/`. Each store owns one domain slice.
-- All Tauri invoke calls go through `src/hooks/useTauriInvoke.ts` — never call
-  `invoke()` directly from a component.
+- Global application state is managed via React Context in `src/context/AppContext.tsx`.
+- Components consume shared state and Tauri service wrappers via the `useAppContext()` hook.
 - Sidecar source lives under `sidecars/<name>/src/`. Compiled output to `dist/`.
 - Tests co-located in `__tests__/` inside each sidecar, or in `src/__tests__/` for
   React. Never mix test files with source files.
@@ -185,7 +192,7 @@ Examples:
 ```
 feat(hunter): add token-bucket rate limiter with crypto jitter
 fix(rag): handle scanned PDF fallback to Tesseract OCR
-docs(adr): record decision to use node.js sidecars over python
+docs(adr): record decision to use python grpc sidecar for hunter
 chore(tauri): whitelist portal domains in capability config
 test(gap-engine): add fixture for missing insurance cert scenario
 ```

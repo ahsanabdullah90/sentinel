@@ -1,5 +1,3 @@
-
-
 services:
   ollama:
     image: ollama/ollama:latest
@@ -29,7 +27,7 @@ services:
     environment:
       - PORT=50051
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     depends_on:
       - ollama
 
@@ -44,7 +42,7 @@ services:
       - CHROMA_URL=http://chromadb:8000
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     depends_on:
       - chromadb
       - ollama

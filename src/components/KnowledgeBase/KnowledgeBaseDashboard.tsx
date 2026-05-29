@@ -1,6 +1,20 @@
 import { useState, useEffect } from 'react';
-import { Database, Plus, Trash2, Tag, Calendar, Eye, X, BookOpen, AlertCircle } from 'lucide-react';
+import {
+  Database,
+  Plus,
+  Trash2,
+  Tag,
+  Calendar,
+  Eye,
+  X,
+  BookOpen,
+  AlertCircle,
+  Paperclip,
+  RefreshCw,
+  Image,
+} from 'lucide-react';
 import SqlDatabase from '@tauri-apps/plugin-sql';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface KnowledgeItem {
   id: string;
@@ -11,7 +25,17 @@ export interface KnowledgeItem {
   created_at: string;
 }
 
-export function KnowledgeBaseDashboard() {
+export interface KnowledgeBaseProps {
+  settings?: {
+    ollamaModel: string;
+    ollamaUrl: string;
+  };
+}
+
+export function KnowledgeBaseDashboard({ settings }: KnowledgeBaseProps) {
+  const ollamaModel = settings?.ollamaModel || 'phi3';
+  const ollamaUrl = settings?.ollamaUrl || 'http://127.0.0.1:11434';
+
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -23,12 +47,65 @@ export function KnowledgeBaseDashboard() {
   const [newTags, setNewTags] = useState('');
   const [newType, setNewType] = useState('text');
 
+  // File attachments state
+  const [attachedFileBytes, setAttachedFileBytes] = useState<Uint8Array | null>(null);
+  const [attachedFileName, setAttachedFileName] = useState('');
+  const [isExtractingPdf, setIsExtractingPdf] = useState(false);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setAttachedFileName(file.name);
+    setIsAnalyzingImage(true);
+
+    if (!newTitle.trim()) {
+      setNewTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+    setNewType('file');
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const arrayBuffer = event.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(arrayBuffer);
+        setAttachedFileBytes(bytes);
+
+        // Invoke local vision model to describe the diagram or image
+        const description = await invoke<string>('generate_vision_description', {
+          imageBytes: Array.from(bytes),
+          model: ollamaModel,
+          url: ollamaUrl,
+        });
+        setNewContent(description);
+      } catch (err) {
+        console.error('Failed to extract image content:', err);
+      } finally {
+        setIsAnalyzingImage(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   // Preview item state
   const [previewItem, setPreviewItem] = useState<KnowledgeItem | null>(null);
 
   useEffect(() => {
-    void loadKnowledgeItems();
-  }, []);
+  void loadKnowledgeItems();
+}, []);
+
+useEffect(() => {
+  return () => {
+    setPreviewItem(null);
+  };
+}, []);
+
+
+
+
+
+
 
   async function loadKnowledgeItems() {
     setLoading(true);
@@ -45,6 +122,39 @@ export function KnowledgeBaseDashboard() {
     }
   }
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setAttachedFileName(file.name);
+    setIsExtractingPdf(true);
+
+    if (!newTitle.trim()) {
+      setNewTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+    setNewType('file');
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const arrayBuffer = event.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(arrayBuffer);
+        setAttachedFileBytes(bytes);
+
+        // Extract text from bytes by converting Uint8Array to a normal standard array
+        const text = await invoke<string>('extract_pdf_text_from_bytes', {
+          bytes: Array.from(bytes),
+        });
+        setNewContent(text);
+      } catch (err) {
+        console.error('Failed to extract PDF text:', err);
+      } finally {
+        setIsExtractingPdf(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   async function handleAddItem(e: React.FormEvent) {
     e.preventDefault();
     if (!newTitle.trim() || !newContent.trim()) return;
@@ -58,14 +168,25 @@ export function KnowledgeBaseDashboard() {
       const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
 
       await db.execute(
-        'INSERT INTO knowledge_base (id, title, content, type, tags, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, newTitle.trim(), newContent.trim(), newType, newTags.trim(), timestamp]
+        'INSERT INTO knowledge_base (id, title, content, type, tags, file_name, file_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          id,
+          newTitle.trim(),
+          newContent.trim(),
+          newType,
+          newTags.trim(),
+          attachedFileName || null,
+          attachedFileBytes || null,
+          timestamp,
+        ]
       );
 
       // Reset form
       setNewTitle('');
       setNewContent('');
       setNewTags('');
+      setAttachedFileBytes(null);
+      setAttachedFileName('');
       setIsAdding(false);
 
       // Reload
@@ -124,19 +245,19 @@ export function KnowledgeBaseDashboard() {
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
-            className="btn btn-primary"
-            onClick={() => setIsAdding(!isAdding)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'linear-gradient(135deg, #007aff 0%, #0051b3 100%)',
-              border: 'none',
-            }}
-          >
-            {isAdding ? <X size={16} /> : <Plus size={16} />}
-            {isAdding ? 'Cancel' : 'Add Knowledge Profile'}
-          </button>
+              className="btn btn-primary"
+              onClick={() => setIsAdding(!isAdding)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'linear-gradient(135deg, #007aff 0%, #0051b3 100%)',
+                border: 'none',
+              }}
+            >
+              {isAdding ? <X size={16} /> : <Plus size={16} />}
+              {isAdding ? 'Cancel' : 'Add Knowledge Profile'}
+            </button>
         </div>
       </div>
 
@@ -216,11 +337,23 @@ export function KnowledgeBaseDashboard() {
                 >
                   Information Type
                 </label>
-                <select value={newType} onChange={(e) => setNewType(e.target.value)}>
-                  <option value="text">General Text / Capability Statement</option>
-                  <option value="resume">Resume / Core Personnel Bio</option>
-                  <option value="case-study">Case Study / Past Performance</option>
-                  <option value="proposal-template">Proposal Shell / Boilerplate</option>
+                <select
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value)}
+                  style={{
+                    color: '#000000',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    padding: '10px',
+                    borderRadius: '8px',
+                    outline: 'none',
+                    fontWeight: '500',
+                  }}
+                >
+                  <option value="text" style={{ color: '#000000', backgroundColor: '#ffffff' }}>General Text / Capability Statement</option>
+                  <option value="resume" style={{ color: '#000000', backgroundColor: '#ffffff' }}>Resume / Core Personnel Bio</option>
+                  <option value="case-study" style={{ color: '#000000', backgroundColor: '#ffffff' }}>Case Study / Past Performance</option>
+                  <option value="proposal-template" style={{ color: '#000000', backgroundColor: '#ffffff' }}>Proposal Shell / Boilerplate</option>
                 </select>
               </div>
               <div className="input-group" style={{ margin: 0 }}>
@@ -240,6 +373,118 @@ export function KnowledgeBaseDashboard() {
                   onChange={(e) => setNewTags(e.target.value)}
                   placeholder="e.g., cloud, software, aws, key-personnel"
                 />
+              </div>
+            </div>
+
+            <div className="input-group" style={{ margin: 0 }}>
+              <label
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#8b90a0',
+                  marginBottom: '5px',
+                  textAlign: 'left',
+                }}
+              >
+                Or Attach PDF / Image Source File
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => document.getElementById('kb-pdf-file-upload')?.click()}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                  }}
+                  disabled={isExtractingPdf || isAnalyzingImage}
+                >
+                  <Paperclip size={14} />
+                  Attach PDF
+                </button>
+                <input
+                  type="file"
+                  id="kb-pdf-file-upload"
+                  accept=".pdf"
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => document.getElementById('kb-img-file-upload')?.click()}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                  }}
+                  disabled={isExtractingPdf || isAnalyzingImage}
+                >
+                  <Image size={14} />
+                  Attach Image
+                </button>
+                <input
+                  type="file"
+                  id="kb-img-file-upload"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  style={{ display: 'none' }}
+                />
+
+                {attachedFileName && (
+                  <span
+                    style={{
+                      fontSize: '0.85rem',
+                      color: '#30d158',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    ✓ {attachedFileName}
+                  </span>
+                )}
+                {isExtractingPdf && (
+                  <span
+                    style={{
+                      fontSize: '0.85rem',
+                      color: 'var(--accent-color)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <RefreshCw
+                      size={14}
+                      className="spin"
+                      style={{ animation: 'spin 1s linear infinite' }}
+                    />
+                    Extracting PDF text locally...
+                  </span>
+                )}
+                {isAnalyzingImage && (
+                  <span
+                    style={{
+                      fontSize: '0.85rem',
+                      color: 'var(--accent-color)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <RefreshCw
+                      size={14}
+                      className="spin"
+                      style={{ animation: 'spin 1s linear infinite' }}
+                    />
+                    Analyzing image layout locally...
+                  </span>
+                )}
               </div>
             </div>
 
@@ -508,8 +753,9 @@ export function KnowledgeBaseDashboard() {
       </div>
 
       {/* View full content Modal overlay */}
-      {previewItem && (
+      {previewItem && ( 
         <div
+          onClick={() => setPreviewItem(null)}
           style={{
             position: 'fixed',
             top: 0,
@@ -527,6 +773,7 @@ export function KnowledgeBaseDashboard() {
         >
           <div
             className="card glass"
+            onClick={(e) => e.stopPropagation()}
             style={{
               width: '90%',
               maxWidth: '700px',
@@ -539,6 +786,7 @@ export function KnowledgeBaseDashboard() {
               overflow: 'hidden',
             }}
           >
+        
             {/* Header */}
             <div
               style={{

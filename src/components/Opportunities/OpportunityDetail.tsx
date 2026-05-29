@@ -11,6 +11,9 @@ import {
   FileText,
   Check,
   Copy,
+  Paperclip,
+  Image,
+  RefreshCw,
 } from 'lucide-react';
 import SqlDatabase from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,7 +32,18 @@ interface KnowledgeItem {
   id: string;
   title: string;
   content: string;
-  type: string;
+  type: string; // 'text' | 'file'
+  tags: string;
+  created_at: string;
+}
+
+interface AttachmentItem {
+  id: string;
+  opportunity_id: string;
+  file_name: string;
+  file_type: string;
+  extracted_text: string | null;
+  created_at: string;
 }
 
 interface Props {
@@ -74,9 +88,126 @@ export function OpportunityDetail({
   const [evaluationStep, setEvaluationStep] = useState<'idle' | 'loading' | 'completed'>('idle');
   const [evaluationLogs, setEvaluationLogs] = useState<string[]>([]);
 
+  // Attachment states
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+
+  async function loadAttachments(oppId: string) {
+    try {
+      const db = await SqlDatabase.load('sqlite:sentinel.db');
+      const result = await db.select<AttachmentItem[]>(
+        'SELECT id, opportunity_id, file_name, file_type, extracted_text, created_at FROM opportunity_attachments WHERE opportunity_id = ? ORDER BY created_at DESC',
+        [oppId]
+      );
+      setAttachments(result);
+    } catch (err) {
+      console.error('Failed to load attachments:', err);
+    }
+  }
+
+  const handleAttachPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !opp) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const arrayBuffer = event.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(arrayBuffer);
+
+        const db = await SqlDatabase.load('sqlite:sentinel.db');
+        const id = Math.random().toString(36).substring(2, 11);
+
+        const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
+        const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
+
+        // 1. Save raw PDF bytes to database first
+        await db.execute(
+          'INSERT INTO opportunity_attachments (id, opportunity_id, file_name, file_type, file_bytes, extracted_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [id, opp.id, file.name, 'pdf', Array.from(bytes), null, timestamp]
+        );
+
+        // 2. Extract text locally using pdftotext
+        const text = await invoke<string>('extract_pdf_text_from_bytes', {
+          bytes: Array.from(bytes),
+        });
+
+        await db.execute('UPDATE opportunity_attachments SET extracted_text = ? WHERE id = ?', [
+          text,
+          id,
+        ]);
+
+        await loadAttachments(opp.id);
+      } catch (err) {
+        console.error('Failed to attach PDF:', err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleAttachImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !opp) return;
+
+    setIsAnalyzingImage(true);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const arrayBuffer = event.target?.result as ArrayBuffer;
+        const bytes = new Uint8Array(arrayBuffer);
+
+        const db = await SqlDatabase.load('sqlite:sentinel.db');
+        const id = Math.random().toString(36).substring(2, 11);
+
+        const localDate = new Date(Date.now() + 5 * 60 * 60 * 1000);
+        const timestamp = localDate.toISOString().replace('T', ' ').substring(0, 19) + ' (GMT+5)';
+
+        // 1. Save raw Image bytes to database first
+        await db.execute(
+          'INSERT INTO opportunity_attachments (id, opportunity_id, file_name, file_type, file_bytes, extracted_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [id, opp.id, file.name, 'image', Array.from(bytes), null, timestamp]
+        );
+
+        // 2. Invoke local vision model via Ollama to generate a markdown description
+        const description = await invoke<string>('generate_vision_description', {
+          imageBytes: Array.from(bytes),
+          model: settings.ollamaModel,
+          url: settings.ollamaUrl,
+        });
+
+        await db.execute('UPDATE opportunity_attachments SET extracted_text = ? WHERE id = ?', [
+          description,
+          id,
+        ]);
+
+        await loadAttachments(opp.id);
+      } catch (err) {
+        console.error('Failed to analyze image:', err);
+      } finally {
+        setIsAnalyzingImage(false);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  async function handleDeleteAttachment(id: string) {
+    if (!confirm('Are you sure you want to delete this attachment?')) return;
+    try {
+      const db = await SqlDatabase.load('sqlite:sentinel.db');
+      await db.execute('DELETE FROM opportunity_attachments WHERE id = ?', [id]);
+      if (opp) {
+        await loadAttachments(opp.id);
+      }
+    } catch (err) {
+      console.error('Failed to delete attachment:', err);
+    }
+  }
+
   useEffect(() => {
     void loadOpportunityDetails();
     void loadKbItems();
+    void loadAttachments(opportunityId);
   }, [opportunityId]);
 
   async function loadOpportunityDetails() {
@@ -151,6 +282,13 @@ export function OpportunityDetail({
         .map((item) => `--- KNOWLEDGE PROFILE: ${item.title} ---\n${item.content}`)
         .join('\n\n');
 
+      const attachmentContext = attachments
+        .map(
+          (att) =>
+            `--- ATTACHED ${att.file_type.toUpperCase()} DOCUMENT: ${att.file_name} ---\n${att.extracted_text || 'Processing visual/diagram elements...'}`
+        )
+        .join('\n\n');
+
       setTimeout(() => {
         setEvaluationLogs((prev) => [
           ...prev,
@@ -164,6 +302,11 @@ export function OpportunityDetail({
 OPPORTUNITY TITLE: ${opp?.title}
 ISSUING ORGANIZATION: ${opp?.issuing_org}
 PORTAL SOURCE: ${opp?.portal}
+
+======================================
+SUPPLEMENTARY RFP ATTACHMENTS (PDFS/DIAGRAMS):
+${attachmentContext || 'No additional files attached.'}
+======================================
 
 ======================================
 OUR COMPANY KNOWLEDGE PROFILES (FACTUAL REFERENCE):
@@ -271,6 +414,13 @@ Return only the JSON output within the code block.`;
         .map((item) => `--- KNOWLEDGE PROFILE: ${item.title} ---\n${item.content}`)
         .join('\n\n');
 
+      const attachmentContext = attachments
+        .map(
+          (att) =>
+            `--- ATTACHED ${att.file_type.toUpperCase()} DOCUMENT: ${att.file_name} ---\n${att.extracted_text || 'Processing visual/diagram elements...'}`
+        )
+        .join('\n\n');
+
       setTimeout(() => {
         setDraftingLogs((prev) => [
           ...prev,
@@ -306,6 +456,11 @@ Return only the JSON output within the code block.`;
       PORTAL SOURCE: ${opp?.portal}
       DEADLINE: ${opp?.date}
       ${evalContextStr}
+
+      ======================================
+      SUPPLEMENTARY RFP ATTACHMENTS (PDFS/DIAGRAMS):
+      ${attachmentContext || 'No additional files attached.'}
+      ======================================
 
       ======================================
       COMPANY KNOWLEDGE PROFILES (FACTUAL REFERENCE):
@@ -1131,125 +1286,269 @@ End of Auto-Generated Proposal Draft.`;
 
         {/* Right Panel: Knowledge Base Attachment Wizard (when not active, or as a side panel when drafting) */}
         {!isDrafting ? (
-          <div
-            className="card glass"
-            style={{
-              border: '1px solid rgba(255,255,255,0.06)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '15px',
-              margin: 0,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <BookOpen size={18} style={{ color: 'var(--accent-color)' }} />
-              <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff' }}>Attach Context</h3>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div
+              className="card glass"
+              style={{
+                border: '1px solid rgba(255,255,255,0.06)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '15px',
+                margin: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <BookOpen size={18} style={{ color: 'var(--accent-color)' }} />
+                <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff' }}>Attach Context</h3>
+              </div>
 
-            <p style={{ margin: 0, fontSize: '0.8rem', color: '#8b90a0', lineHeight: '1.4' }}>
-              Choose the factual information modules below that the AI agent should draw from when
-              writing this proposal response.
-            </p>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: '#8b90a0', lineHeight: '1.4' }}>
+                Choose the factual information modules below that the AI agent should draw from when
+                writing this proposal response.
+              </p>
 
-            {kbItems.length === 0 ? (
-              <div
-                style={{
-                  padding: '20px',
-                  textAlign: 'center',
-                  color: '#8b90a0',
-                  fontSize: '0.82rem',
-                  backgroundColor: 'rgba(0,0,0,0.15)',
-                  borderRadius: '6px',
-                }}
-              >
-                No custom knowledge items found.
-                <span
+              {kbItems.length === 0 ? (
+                <div
                   style={{
-                    display: 'block',
-                    marginTop: '5px',
-                    fontSize: '0.75rem',
-                    color: 'var(--accent-color)',
+                    padding: '20px',
+                    textAlign: 'center',
+                    color: '#8b90a0',
+                    fontSize: '0.82rem',
+                    backgroundColor: 'rgba(0,0,0,0.15)',
+                    borderRadius: '6px',
                   }}
                 >
-                  Populate your Knowledge Base to enable factual RAG proposals.
-                </span>
-              </div>
-            ) : (
-              <div
+                  No custom knowledge items found.
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: '5px',
+                      fontSize: '0.75rem',
+                      color: 'var(--accent-color)',
+                    }}
+                  >
+                    Populate your Knowledge Base to enable factual RAG proposals.
+                  </span>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    maxHeight: '250px',
+                    overflowY: 'auto',
+                    paddingRight: '5px',
+                  }}
+                >
+                  {kbItems.map((item) => {
+                    const isChecked = selectedKbs.includes(item.id);
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => handleToggleKb(item.id)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '6px',
+                          border: `1px solid ${isChecked ? 'var(--accent-color)' : 'rgba(255,255,255,0.06)'}`,
+                          backgroundColor: isChecked
+                            ? 'rgba(0,122,255,0.05)'
+                            : 'rgba(255,255,255,0.01)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '10px',
+                          transition: 'all 0.15s',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {}} // handled by parent click
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '0.82rem', color: '#fff', fontWeight: 500 }}>
+                            {item.title}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              color: '#8b90a0',
+                              textTransform: 'capitalize',
+                              marginTop: '2px',
+                            }}
+                          >
+                            Type: {item.type}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button
+                className="btn btn-primary"
+                onClick={handleRunEvaluation}
+                disabled={evaluationStep === 'loading'}
                 style={{
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                  maxHeight: '250px',
-                  overflowY: 'auto',
-                  paddingRight: '5px',
+                  alignItems: 'center',
+                  gap: '6px',
+                  justifyContent: 'center',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
+                  border: 'none',
+                  boxShadow: '0 0 10px rgba(99, 102, 241, 0.3)',
+                  marginTop: '10px',
                 }}
               >
-                {kbItems.map((item) => {
-                  const isChecked = selectedKbs.includes(item.id);
-                  return (
+                <Sparkles size={16} /> Run Fit & Compatibility Analysis
+              </button>
+            </div>
+
+            {/* Supplementary RFP Attachments Card */}
+            <div
+              className="card glass"
+              style={{
+                border: '1px solid rgba(255,255,255,0.06)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '15px',
+                margin: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Paperclip size={18} style={{ color: 'var(--accent-color)' }} />
+                <h3 style={{ margin: 0, fontSize: '1rem', color: '#fff' }}>RFP Attachments</h3>
+              </div>
+
+              <p style={{ margin: 0, fontSize: '0.8rem', color: '#8b90a0', lineHeight: '1.4' }}>
+                Attach supplementary PDFs or images (e.g., technical diagrams) to this opportunity.
+                PDF text and image descriptions will automatically enrich the AI model context.
+              </p>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => document.getElementById('opp-pdf-upload')?.click()}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <FileText size={14} /> Attach PDF
+                </button>
+                <input
+                  type="file"
+                  id="opp-pdf-upload"
+                  accept=".pdf"
+                  onChange={handleAttachPDF}
+                  style={{ display: 'none' }}
+                />
+
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => document.getElementById('opp-img-upload')?.click()}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    justifyContent: 'center',
+                  }}
+                  disabled={isAnalyzingImage}
+                >
+                  {isAnalyzingImage ? (
+                    <RefreshCw
+                      size={14}
+                      className="spin"
+                      style={{ animation: 'spin 1s linear infinite' }}
+                    />
+                  ) : (
+                    <Image size={14} />
+                  )}
+                  {isAnalyzingImage ? 'Analyzing...' : 'Attach Image'}
+                </button>
+                <input
+                  type="file"
+                  id="opp-img-upload"
+                  accept="image/*"
+                  onChange={handleAttachImage}
+                  style={{ display: 'none' }}
+                />
+              </div>
+
+              {attachments.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    marginTop: '5px',
+                  }}
+                >
+                  {attachments.map((att) => (
                     <div
-                      key={item.id}
-                      onClick={() => handleToggleKb(item.id)}
+                      key={att.id}
                       style={{
-                        padding: '10px 12px',
+                        padding: '10px',
                         borderRadius: '6px',
-                        border: `1px solid ${isChecked ? 'var(--accent-color)' : 'rgba(255,255,255,0.06)'}`,
-                        backgroundColor: isChecked
-                          ? 'rgba(0,122,255,0.05)'
-                          : 'rgba(255,255,255,0.01)',
-                        cursor: 'pointer',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        backgroundColor: 'rgba(255,255,255,0.02)',
                         display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px',
-                        transition: 'all 0.15s',
-                        textAlign: 'left',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {}} // handled by parent click
-                        style={{ marginTop: '2px', cursor: 'pointer' }}
-                      />
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontSize: '0.82rem', color: '#fff', fontWeight: 500 }}>
-                          {item.title}
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px',
+                          minWidth: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: '0.8rem',
+                            color: '#fff',
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {att.file_name}
                         </span>
                         <span
                           style={{
-                            fontSize: '0.7rem',
+                            fontSize: '0.68rem',
                             color: '#8b90a0',
-                            textTransform: 'capitalize',
-                            marginTop: '2px',
+                            textTransform: 'uppercase',
                           }}
                         >
-                          Type: {item.type}
+                          {att.file_type}
                         </span>
                       </div>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => handleDeleteAttachment(att.id)}
+                        style={{ color: '#ff3b30', padding: '4px' }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <button
-              className="btn btn-primary"
-              onClick={handleRunEvaluation}
-              disabled={evaluationStep === 'loading'}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                justifyContent: 'center',
-                background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
-                border: 'none',
-                boxShadow: '0 0 10px rgba(99, 102, 241, 0.3)',
-                marginTop: '10px',
-              }}
-            >
-              <Sparkles size={16} /> Run Fit & Compatibility Analysis
-            </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         ) : null}
       </div>

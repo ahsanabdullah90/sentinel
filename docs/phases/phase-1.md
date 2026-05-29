@@ -7,7 +7,7 @@
 
 | File                                  | Change                                                                    |
 | ------------------------------------- | ------------------------------------------------------------------------- |
-| `sentinel/package.json`               | Installed Tailwind, Zustand, Zod, Framer Motion, Vitest, Lucide React     |
+| `sentinel/package.json`               | Installed Tailwind, Zod, Framer Motion, Vitest, Lucide React              |
 | `src-tauri/tauri.conf.json`           | Updated `productName`, window dimensions, and strict CSP                  |
 | `src-tauri/capabilities/default.json` | Defined `core:default`, `sql:default`, and shell spawn/stdin capabilities |
 | `src/types/domain.ts`                 | Created full suite of Zod schemas and TS types                            |

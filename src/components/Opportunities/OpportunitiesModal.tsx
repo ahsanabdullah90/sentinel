@@ -364,7 +364,7 @@ export function OpportunitiesModal({
               No opportunities matching the filters found.
             </div>
           ) : (
-            filtered.map((opp, idx) => {
+            filtered.map((opp) => {
               const statusVal = opp.status || 'discovered';
               return (
                 <div
@@ -380,9 +380,17 @@ export function OpportunitiesModal({
                     gap: '8px',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
                     <h3 style={{ color: '#fff', margin: 0, fontSize: '1rem' }}>{opp.title}</h3>
-                    <span style={{ color: '#8b90a0', fontSize: '0.85rem' }}>{opp.date || 'No Date'}</span>
+                    <span style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
+                      {opp.date || 'No Date'}
+                    </span>
                   </div>
                   <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
                     <strong>Issuing Org:</strong> {opp.issuing_org || 'N/A'}

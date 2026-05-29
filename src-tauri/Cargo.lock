@@ -4086,6 +4086,7 @@ dependencies = [
 name = "sentinel_rfp"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "opentelemetry",
  "opentelemetry_sdk",
  "prost",

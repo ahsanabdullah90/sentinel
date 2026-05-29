@@ -6,15 +6,15 @@ This document provides a visual and textual overview of the **Sentinel** system 
 
 ## System Components
 
-| Component | Language | Description |
-|-----------|----------|-------------|
-| **Frontend** | TypeScript (Tauri + React) | Desktop UI that interacts with the backend via gRPC. |
-| **Hunter Sidecar** | Python (asyncio, Playwright, Gemini) | Handles portal detection, scraping strategies, and rate‑limiting. |
-| **RAG Sidecar** | Python (Ollama, ChromaDB) | Ingests documents, stores embeddings, and answers queries. |
-| **Gap Engine** | Python (to be implemented) | Analyzes RFP gaps and produces a structured gap report. |
-| **Worker** | Python (redis‑py) | Background job processor that consumes tasks from Redis queues. |
-| **gRPC Protobuf** | `.proto` files | Defines the service contracts between the frontend and sidecars. |
-| **Docker Compose** | Docker | Orchestrates containers for each sidecar and supporting services (Redis, Chroma, Ollama). |
+| Component          | Language                             | Description                                                                               |
+| ------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| **Frontend**       | TypeScript (Tauri + React)           | Desktop UI that interacts with the backend via gRPC.                                      |
+| **Hunter Sidecar** | Python (asyncio, Playwright, Gemini) | Handles portal detection, scraping strategies, and rate‑limiting.                         |
+| **RAG Sidecar**    | Python (Ollama, ChromaDB)            | Ingests documents, stores embeddings, and answers queries.                                |
+| **Gap Engine**     | Python (to be implemented)           | Analyzes RFP gaps and produces a structured gap report.                                   |
+| **Worker**         | Python (redis‑py)                    | Background job processor that consumes tasks from Redis queues.                           |
+| **gRPC Protobuf**  | `.proto` files                       | Defines the service contracts between the frontend and sidecars.                          |
+| **Docker Compose** | Docker                               | Orchestrates containers for each sidecar and supporting services (Redis, Chroma, Ollama). |
 
 ---
 
@@ -73,6 +73,7 @@ flowchart TD
 ---
 
 ## Data Flow
+
 1. **User initiates a hunt** → Frontend calls `Hunter.Detect` → `PortalAnalyzer` identifies the search selector → `ScraperEngine` performs the search and streams back opportunities.
 2. **User submits a document** → Frontend calls `RAG.Ingest` → `Ingest` stores the document, creates embeddings via `OllamaClient`, and upserts into `ChromaClient`.
 3. **User asks a question** → Frontend calls `RAG.Query` → Context is retrieved from ChromaDB, fed to Ollama to generate an answer.
@@ -82,10 +83,11 @@ flowchart TD
 ---
 
 ## Future Enhancements
+
 - Replace the placeholder Gap Engine logic with AI‑driven gap detection.
 - Add more sophisticated job scheduling and monitoring.
 - Implement comprehensive unit and integration tests for the new Python modules.
 
 ---
 
-*Generated on 2026‑05‑25.*
+_Generated on 2026‑05‑25._

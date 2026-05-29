@@ -8,8 +8,8 @@
     <script>
       // Mock Tauri v2 IPC for standard web browser environment
       if (!window.__TAURI_INTERNALS__) {
-        console.log("Injecting mock Tauri v2 Internals for browser environment");
-        
+        console.log('Injecting mock Tauri v2 Internals for browser environment');
+
         // Custom mock database handler/state
         const mockOpportunities = [
           {
@@ -18,7 +18,7 @@
             issuing_org: 'Department of Transportation',
             date: '2026-06-30',
             status: 'discovered',
-            portal: 'SAM.gov'
+            portal: 'SAM.gov',
           },
           {
             id: '2',
@@ -26,7 +26,7 @@
             issuing_org: 'National Institutes of Health',
             date: '2026-07-15',
             status: 'discovered',
-            portal: 'GovWin'
+            portal: 'GovWin',
           },
           {
             id: '3',
@@ -34,7 +34,7 @@
             issuing_org: 'City of Seattle',
             date: '2026-06-25',
             status: 'discovered',
-            portal: 'Seattle Tender Portal'
+            portal: 'Seattle Tender Portal',
           },
           {
             id: '4',
@@ -42,7 +42,7 @@
             issuing_org: 'Department of Energy',
             date: '2026-08-01',
             status: 'discovered',
-            portal: 'SAM.gov'
+            portal: 'SAM.gov',
           },
           {
             id: '5',
@@ -50,7 +50,7 @@
             issuing_org: 'State of Oregon',
             date: '2026-07-10',
             status: 'discovered',
-            portal: 'OregonBuy'
+            portal: 'OregonBuy',
           },
           {
             id: '6',
@@ -58,8 +58,8 @@
             issuing_org: 'Federal Communications Commission',
             date: '2026-09-12',
             status: 'discovered',
-            portal: 'SAM.gov'
-          }
+            portal: 'SAM.gov',
+          },
         ];
 
         const mockPortals = [
@@ -74,20 +74,24 @@
             opportunities_count: 6,
             rendering_mode: 'Static HTML',
             cloudflare_bypass_score: 'Low Risk',
-            selector_config: '{"searchSelector":"input#query-data"}'
-          }
+            selector_config: '{"searchSelector":"input#query-data"}',
+          },
         ];
 
         window.__TAURI_INTERNALS__ = {
           plugins: {},
           invoke: async (cmd, args = {}) => {
-            console.log("Mock invoke called:", cmd, args);
-            
+            console.log('Mock invoke called:', cmd, args);
+
             if (cmd === 'plugin:sql|load') {
               return 'sentinel-db-handle';
             }
-            
-            if (cmd === 'plugin:sql|query' || cmd === 'plugin:sql|execute' || cmd === 'plugin:sql|select') {
+
+            if (
+              cmd === 'plugin:sql|query' ||
+              cmd === 'plugin:sql|execute' ||
+              cmd === 'plugin:sql|select'
+            ) {
               const queryStr = args.query || '';
               if (queryStr.includes('opportunities')) {
                 return mockOpportunities;
@@ -97,11 +101,11 @@
               }
               return [];
             }
-            
+
             if (cmd === 'plugin:sql|close') {
               return true;
             }
-            
+
             if (cmd === 'get_ollama_models') {
               return ['phi3', 'llama3', 'mistral', 'qwen2.5'];
             }
@@ -113,14 +117,14 @@
             if (cmd === 'bootstrap_system') {
               return 'Success';
             }
-            
+
             return null;
-          }
+          },
         };
 
         // Also define metadata/IPC as fallback
         window.__TAURI_IPC__ = (message) => {
-          console.log("Mock IPC fallback called:", message);
+          console.log('Mock IPC fallback called:', message);
         };
       }
     </script>

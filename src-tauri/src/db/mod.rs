@@ -60,6 +60,22 @@ pub fn init() -> Vec<Migration> {
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
                   );",
             kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "add_attachments_and_raw_bytes",
+            sql: "ALTER TABLE knowledge_base ADD COLUMN file_name TEXT;
+                  ALTER TABLE knowledge_base ADD COLUMN file_bytes BLOB;
+                  CREATE TABLE IF NOT EXISTS opportunity_attachments (
+                      id TEXT PRIMARY KEY,
+                      opportunity_id TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+                      file_name TEXT NOT NULL,
+                      file_type TEXT NOT NULL,
+                      file_bytes BLOB NOT NULL,
+                      extracted_text TEXT,
+                      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                  );",
+            kind: MigrationKind::Up,
         }
     ]
 }

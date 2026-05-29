@@ -10,10 +10,8 @@ interface Props {
 }
 
 export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Props) {
-  const [ollamaModel, setOllamaModel] = useState('phi3');
+  const [ollamaModel, setOllamaModel] = useState('');
   const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
-  const [customModel, setCustomModel] = useState('');
-  const [showCustomInput, setShowCustomInput] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -52,8 +50,7 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
   }, [isOpen, ollamaUrl]);
 
   const handleSave = () => {
-    const finalModel = showCustomInput ? customModel : ollamaModel;
-    onSave({ ollamaModel: finalModel, ollamaUrl });
+    onSave({ ollamaModel, ollamaUrl });
     onClose();
   };
 
@@ -113,61 +110,37 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
               Ollama Model Name
             </label>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              {!showCustomInput && models.length > 0 ? (
-                <select
-                  value={ollamaModel}
-                  onChange={(e) => {
-                    if (e.target.value === '__custom__') {
-                      setShowCustomInput(true);
-                    } else {
-                      setOllamaModel(e.target.value);
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '8px',
-                    borderRadius: '4px',
-                    border: '1px solid #333',
-                    backgroundColor: '#2a2a2a',
-                    color: '#fff',
-                    boxSizing: 'border-box',
-                    height: '38px',
-                  }}
-                >
-                  {models.map((m) => (
-                    <option key={m} value={m}>
+              <select
+                value={ollamaModel}
+                onChange={(e) => setOllamaModel(e.target.value)}
+                disabled={models.length === 0}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc',
+                  backgroundColor: models.length === 0 ? '#f0f0f0' : '#ffffff',
+                  color: models.length === 0 ? '#888888' : '#000000',
+                  boxSizing: 'border-box',
+                  height: '38px',
+                  fontWeight: '500',
+                }}
+              >
+                {models.length > 0 ? (
+                  models.map((m) => (
+                    <option key={m} value={m} style={{ color: '#000000', backgroundColor: '#ffffff' }}>
                       {m}
                     </option>
-                  ))}
-                  <option value="__custom__">+ Enter Custom Model Name...</option>
-                </select>
-              ) : (
-                <input
-                  value={showCustomInput ? customModel : ollamaModel}
-                  onChange={(e) => {
-                    if (showCustomInput) {
-                      setCustomModel(e.target.value);
-                    } else {
-                      setOllamaModel(e.target.value);
-                    }
-                  }}
-                  placeholder="e.g. phi3, llama3"
-                  style={{
-                    flex: 1,
-                    padding: '8px',
-                    borderRadius: '4px',
-                    border: '1px solid #333',
-                    backgroundColor: '#2a2a2a',
-                    color: '#fff',
-                    boxSizing: 'border-box',
-                    height: '38px',
-                  }}
-                />
-              )}
+                  ))
+                ) : (
+                  <option value="" style={{ color: '#888888', backgroundColor: '#ffffff' }}>
+                    {loadingModels ? 'Fetching models...' : 'No models found (Ollama offline)'}
+                  </option>
+                )}
+              </select>
               <button
                 type="button"
                 onClick={() => {
-                  setShowCustomInput(false);
                   void fetchModels(ollamaUrl);
                 }}
                 disabled={loadingModels}
@@ -193,39 +166,6 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
                 />
               </button>
             </div>
-            {showCustomInput && (
-              <div style={{ marginTop: '8px' }}>
-                <input
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  placeholder="Enter custom model name..."
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    borderRadius: '4px',
-                    border: '1px solid #333',
-                    backgroundColor: '#2a2a2a',
-                    color: '#fff',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCustomInput(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#007aff',
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    marginTop: '5px',
-                    padding: 0,
-                  }}
-                >
-                  Back to List
-                </button>
-              </div>
-            )}
             {modelError && (
               <span
                 style={{

@@ -12,7 +12,7 @@ Sentinel is a privacy-first, desktop application designed for automated Discover
 
 1. **Frontend (Tauri + React + Vite + TypeScript)**:
    - Provides the desktop GUI.
-   - State managed via Zustand.
+   - State managed via React Context (AppContext in `src/context/AppContext.tsx`).
    - Communicates with sidecars via gRPC and Rust IPC.
    - Built with TailwindCSS and custom Glassmorphic components.
 
@@ -21,8 +21,9 @@ Sentinel is a privacy-first, desktop application designed for automated Discover
    - Contains SQLite database integration using `sqlx` and `tauri-plugin-sql`.
    - Initializes OpenTelemetry tracing.
 
-3. **Sidecar: Hunter (Node.js)**:
-   - Uses **Playwright** to scrape and navigate RFP portals.
+3. **Sidecar: Hunter (Python)**:
+   - Uses **Playwright (Python)** to scrape and navigate RFP portals.
+   - Strict local-only dynamic adapter architecture with custom adapter registries.
    - Strict rate-limiting enforced to respect target servers.
    - Communicates with the core app via gRPC (`port 50051`).
 
@@ -86,7 +87,6 @@ The `docker-compose.yml` orchestrates:
 - **Ollama**: Local LLM execution.
 - **ChromaDB**: Vector database.
 - **Redis**: Job queue for the worker pool.
-- **Hunter**: Node.js sidecar for scraping (Port 50051).
 - **RAG**: Node.js sidecar for LLM processing (Port 50052).
 
 ---
@@ -100,7 +100,11 @@ If you are an agent taking over this project on a new machine, execute these ste
 
    ```bash
    npm ci
-   cd sidecars/hunter && npm install
+   # Setup Python dependencies for Hunter sidecar
+   cd sidecars/hunter
+   pip install grpcio grpcio-tools playwright pydantic httpx
+   playwright install chromium
+   # Setup other Node sidecars
    cd ../rag && npm install
    cd ../worker && npm install
    cd ../dispatcher && npm install
@@ -159,6 +163,6 @@ If you are an agent taking over this project on a new machine, execute these ste
 
 - `src-tauri/src/lib.rs` & `ipc.rs`: Rust backend logic and IPC handlers.
 - `src-tauri/tauri.conf.json`: App configuration, security CSP, and auto-updater endpoints.
-- `sidecars/*/src/server.ts`: Entry points for the Node.js gRPC sidecars.
+- `sidecars/*/src/server.ts` (Node.js) or `sidecars/hunter/src_py/server.py` (Python): Entry points for the gRPC sidecars.
 - `docker-compose.yml`: Infrastructure topology.
 - `config/schema.ts` & `config/config.yaml`: Centralized configuration setup.

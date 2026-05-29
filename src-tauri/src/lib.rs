@@ -50,6 +50,74 @@ async fn generate_chat_response(prompt: String, model: String, url: String) -> R
 }
 
 #[tauri::command]
+async fn generate_vision_description(
+    image_bytes: Vec<u8>,
+    model: String,
+    url: String,
+) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+
+    let base64_image = general_purpose::STANDARD.encode(image_bytes);
+    
+    let client = reqwest::Client::new();
+    let prompt = "Analyze this technical diagram. Provide a detailed structured description including: 1. Core components/nodes, 2. The connections, arrows, or relationships between them, 3. The directional sequence or flow of data.";
+
+    let res = client.post(&format!("{}/api/generate", url))
+        .json(&serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "images": vec![base64_image],
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    
+    if let Some(response) = json.get("response") {
+        if let Some(text) = response.as_str() {
+            return Ok(text.to_string());
+        }
+    }
+    
+    Err("Failed to get visual description from local Ollama model".to_string())
+}
+
+#[tauri::command]
+async fn extract_pdf_text_from_bytes(bytes: Vec<u8>) -> Result<String, String> {
+    use std::process::Command;
+    use std::fs::File;
+    use std::io::Write;
+
+    let temp_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    let temp_path = temp_dir.join(format!("temp_extracted_{}.pdf", uuid::Uuid::new_v4()));
+
+    // Write bytes to temp file
+    let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+
+    // Extract text
+    let output = Command::new("pdftotext")
+        .arg(&temp_path)
+        .arg("-")
+        .output();
+
+    // Clean up temp file immediately
+    let _ = std::fs::remove_file(&temp_path);
+
+    let output = output.map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("pdftotext failed: {}", stderr));
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    Ok(text)
+}
+
+#[tauri::command]
 async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
@@ -112,6 +180,7 @@ pub fn run() {
     telemetry::init_telemetry();
 
     tauri::Builder::default()
+        .manage(crate::sidecar::HunterRegistry::new())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_sql::Builder::default().add_migrations("sqlite:sentinel.db", db::init()).build())
         .plugin(tauri_plugin_opener::init())
@@ -120,6 +189,8 @@ pub fn run() {
             check_ollama_status,
             get_ollama_models,
             generate_chat_response,
+            generate_vision_description,
+            extract_pdf_text_from_bytes,
             analyze_gaps,
             bootstrap_system,
             commands::hunting::start_hunt_session,

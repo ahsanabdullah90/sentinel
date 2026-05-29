@@ -2,6 +2,23 @@
 import { ChromaClient } from './chroma-client.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
+
+function chunkText(text: string, chunkSize = 1000, overlap = 100): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + chunkSize, text.length);
+    chunks.push(text.substring(start, end));
+    // Avoid infinite loop if overlap is larger than chunk size
+    if (chunkSize <= overlap) {
+      start += chunkSize;
+    } else {
+      start += chunkSize - overlap;
+    }
+  }
+  return chunks;
+}
 
 // Note: In Sprint 1, we stub actual document extraction for speed,
 // but lay out the pipeline structure.
@@ -25,13 +42,32 @@ export async function ingestDocument(rfpId: string, filePath: string) {
     JSON.stringify({ event: 'progress', portalId: 'rag', message: `Parsing ${ext} file...` })
   );
 
-  // 1. Stub extraction (would use pdf-parse, mammoth, xlsx)
-  const extractedText = `This is mock extracted text for RFP ${rfpId} from ${filePath}.`;
+  // 1. Live extraction using pdftotext or filesystem read
+  let extractedText = '';
+  if (ext === '.pdf') {
+    try {
+      extractedText = execSync(`pdftotext "${filePath}" -`, { encoding: 'utf-8' });
+    } catch (err) {
+      console.warn('pdftotext failed, falling back to mock text extraction:', err);
+      extractedText = `This is mock extracted text for RFP ${rfpId} from ${filePath}.`;
+    }
+  } else {
+    try {
+      extractedText = fs.readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      console.warn('fs read failed, using mock text:', err);
+      extractedText = `This is mock extracted text for RFP ${rfpId} from ${filePath}.`;
+    }
+  }
 
   console.log(JSON.stringify({ event: 'progress', portalId: 'rag', message: 'Chunking text...' }));
 
-  // 2. Stub chunking
-  const chunks = [{ text: extractedText, id: `${rfpId}-chunk-0` }];
+  // 2. Real chunking
+  const textChunks = chunkText(extractedText, 1000, 100);
+  const chunks = textChunks.map((text, idx) => ({
+    text,
+    id: `${rfpId}-chunk-${idx}`,
+  }));
 
   console.log(
     JSON.stringify({

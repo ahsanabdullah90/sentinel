@@ -1,16 +1,7 @@
 """Scraper Engine Module
 
 Implements the Strategy pattern for scraping external portals.
-
-Available strategies:
-    * ``PublicApiStrategy``  – fetch from a public REST API.
-    * ``StaticHtmlStrategy`` – simple HTTP GET + parse.
-    * ``PlaywrightStrategy`` – headless Chromium via Playwright.
-    * ``GenericSearchStrategy`` – AI-powered search-bar detection and
-      opportunity extraction using Google Gemini.
-
-The helper ``extract_json`` robustly parses JSON from markdown-fenced
-or bare responses returned by LLMs.
+Utilizes pluggable adapters and local-only Ollama extraction.
 """
 
 import asyncio
@@ -19,14 +10,56 @@ import json
 import secrets
 import logging
 import re
-from typing import List, Dict, Any
-from urllib.parse import quote, urlparse
+from typing import List, Dict, Any, Optional, Callable, Awaitable
+from urllib.parse import urlparse
 import urllib.request
 from playwright.async_api import async_playwright
-import google.generativeai as genai
+
 from .rate_limiter import TokenBucketRateLimiter
+from .utils.search_detector import detect_search_input
+from .adapters import resolve_adapter
+from .models import PortalConfig, RFPOpportunity, OllamaExtraction
 
 logger = logging.getLogger("hunter.scraper_engine")
+
+
+# ---------------------------------------------------------------------------
+# Progress & Event Reporting
+# ---------------------------------------------------------------------------
+
+class ProgressReporter:
+    """Handles unified reporting of progress and findings to stdout and gRPC."""
+
+    def __init__(self, portal_id: str, on_event: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None):
+        self.portal_id = portal_id
+        self.on_event = on_event
+
+    async def report_progress(self, message: str) -> None:
+        """Report a standard progress string."""
+        event_data = {
+            "portalId": self.portal_id,
+            "message": message
+        }
+        print(json.dumps({"event": "progress", **event_data}), flush=True)
+        if self.on_event:
+            await self.on_event("progress", event_data)
+
+    async def report_opportunity(self, opp: RFPOpportunity) -> None:
+        """Report a discovered opportunity."""
+        event_data = opp.model_dump(by_alias=True)
+        print(json.dumps({"event": "opportunity_found", "data": event_data}), flush=True)
+        if self.on_event:
+            await self.on_event("opportunity_found", event_data)
+
+    async def report_portal_detected(self, search_selector: str, base_url: str) -> None:
+        """Report successful search input selector detection."""
+        event_data = {
+            "url": base_url,
+            "searchSelector": search_selector
+        }
+        print(json.dumps({"event": "portal_detected", "data": event_data}), flush=True)
+        if self.on_event:
+            await self.on_event("portal_detected", event_data)
 
 
 # ---------------------------------------------------------------------------
@@ -67,122 +100,92 @@ def extract_json(text: str) -> Any:
 class ScrapingStrategy:
     """Base class for all scraping strategies."""
 
-    async def execute(self, config: Dict[str, Any], rate_limiter: TokenBucketRateLimiter) -> List[Dict[str, Any]]:
+    async def execute(self, config: PortalConfig, rate_limiter: TokenBucketRateLimiter, reporter: ProgressReporter) -> List[RFPOpportunity]:
         raise NotImplementedError()
 
 
 class PublicApiStrategy(ScrapingStrategy):
     """Fetch opportunities from a publicly accessible REST API."""
 
-    async def execute(self, config: Dict[str, Any], rate_limiter: TokenBucketRateLimiter) -> List[Dict[str, Any]]:
+    async def execute(self, config: PortalConfig, rate_limiter: TokenBucketRateLimiter, reporter: ProgressReporter) -> List[RFPOpportunity]:
         await rate_limiter.acquire()
-        print(json.dumps({
-            "event": "progress",
-            "portalId": config.get("id"),
-            "message": "Fetching from public API (Python stub)..."
-        }), flush=True)
+        await reporter.report_progress("Fetching from public API (Python stub)...")
         return []
 
 
 class StaticHtmlStrategy(ScrapingStrategy):
     """Download and parse a static HTML page."""
 
-    async def execute(self, config: Dict[str, Any], rate_limiter: TokenBucketRateLimiter) -> List[Dict[str, Any]]:
+    async def execute(self, config: PortalConfig, rate_limiter: TokenBucketRateLimiter, reporter: ProgressReporter) -> List[RFPOpportunity]:
         await rate_limiter.acquire()
-        print(json.dumps({
-            "event": "progress",
-            "portalId": config.get("id"),
-            "message": "Fetching static HTML (Python stub)..."
-        }), flush=True)
+        await reporter.report_progress("Fetching static HTML (Python stub)...")
         return []
 
 
 class PlaywrightStrategy(ScrapingStrategy):
     """Render a JS-heavy page with headless Chromium."""
 
-    async def execute(self, config: Dict[str, Any], rate_limiter: TokenBucketRateLimiter) -> List[Dict[str, Any]]:
+    async def execute(self, config: PortalConfig, rate_limiter: TokenBucketRateLimiter, reporter: ProgressReporter) -> List[RFPOpportunity]:
         await rate_limiter.acquire()
-        print(json.dumps({
-            "event": "progress",
-            "portalId": config.get("id"),
-            "message": "Launching headless browser (Python Playwright stub)..."
-        }), flush=True)
+        await reporter.report_progress("Launching headless browser (Python Playwright stub)...")
         return []
 
 
 class GenericSearchStrategy(ScrapingStrategy):
-    """AI-powered generic search: detect the search bar, enter keywords,
-    and extract opportunities from the results page using Gemini."""
+    """AI-powered generic search: detect the search bar using heuristics, enter
+    keywords, and extract opportunities from the results page using local Ollama.
+    """
 
-    async def execute(self, config: Dict[str, Any], rate_limiter: TokenBucketRateLimiter) -> List[Dict[str, Any]]:
+    async def execute(self, config: PortalConfig, rate_limiter: TokenBucketRateLimiter, reporter: ProgressReporter) -> List[RFPOpportunity]:
         await rate_limiter.acquire()
-        portal_id = config.get("id", "unknown")
-        base_url = config.get("baseUrl")
-        keywords = config.get("keywords", "RFP")
+        portal_id = config.id
+        base_url = config.base_url
+        keywords = config.keywords or "RFP"
 
-        print(json.dumps({
-            "event": "progress",
-            "portalId": portal_id,
-            "message": "Running generic search strategy (Python)..."
-        }), flush=True)
+        await reporter.report_progress(f"Starting generic search strategy for {config.name}...")
 
         search_selector = ""
-        selector_config = config.get("selectorConfig")
-        if selector_config:
+        if config.selector_config:
             try:
-                selectors = json.loads(selector_config)
+                selectors = json.loads(config.selector_config)
                 search_selector = selectors.get("searchSelector", "")
             except Exception:
                 logger.warning("Failed to parse selector config, using heuristics")
 
-        opportunities: List[Dict[str, Any]] = []
-        api_key = os.environ.get("GEMINI_API_KEY")
+        opportunities: List[RFPOpportunity] = []
 
         keyword_list = [k.strip() for k in re.split(r"[,;\n]+", keywords) if k.strip()]
         if not keyword_list:
             keyword_list.append("RFP")
 
-        print(json.dumps({
-            "event": "progress",
-            "portalId": portal_id,
-            "message": f"Identified {len(keyword_list)} search keyword(s) to process: {', '.join(keyword_list)}"
-        }), flush=True)
+        await reporter.report_progress(f"Identified {len(keyword_list)} search keyword(s) to process: {', '.join(keyword_list)}")
+
+        adapter = resolve_adapter(base_url)
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
             try:
                 for keyword in keyword_list:
-                    print(json.dumps({
-                        "event": "progress",
-                        "portalId": portal_id,
-                        "message": f'Starting hunt for keyword: "{keyword}"'
-                    }), flush=True)
+                    await reporter.report_progress(f'Starting hunt for keyword: "{keyword}"')
 
                     page = await browser.new_page()
                     try:
                         target_url = base_url
-                        is_direct_query = "resume.brightspyre.com" in target_url
+                        is_direct_query = adapter.supports_direct_query()
 
                         if is_direct_query:
-                            target_url = f"https://resume.brightspyre.com/jobs?query={quote(keyword)}"
-                            print(json.dumps({
-                                "event": "progress",
-                                "portalId": portal_id,
-                                "message": f"[{keyword}] Routing directly to: {target_url}"
-                            }), flush=True)
+                            target_url = adapter.build_search_url(base_url, keyword)
+                            await reporter.report_progress(f"[{keyword}] Routing directly to: {target_url}")
 
-                        await page.goto(target_url, wait_until="networkidle", timeout=30000)
+                        await page.goto(target_url, wait_until="load", timeout=15000)
+                        await asyncio.sleep(2)
 
                         if not is_direct_query:
                             if not search_selector:
-                                search_selector = await self._detect_search_input(page)
+                                search_selector = await detect_search_input(page)
 
                             if search_selector:
-                                print(json.dumps({
-                                    "event": "progress",
-                                    "portalId": portal_id,
-                                    "message": f"[{keyword}] Entering query into: {search_selector}..."
-                                }), flush=True)
+                                await reporter.report_progress(f"[{keyword}] Entering query into: {search_selector}...")
                                 try:
                                     await page.fill(search_selector, keyword)
                                     clicked = await page.evaluate("""(sel) => {
@@ -208,45 +211,54 @@ class GenericSearchStrategy(ScrapingStrategy):
                                 except Exception as fill_err:
                                     logger.warning(f"[{keyword}] Failed to interact with search bar: {str(fill_err)}")
                             else:
-                                print(json.dumps({
-                                    "event": "progress",
-                                    "portalId": portal_id,
-                                    "message": f"[{keyword}] No search bar detected, scraping current page..."
-                                }), flush=True)
+                                await reporter.report_progress(f"[{keyword}] No search bar detected, scraping current page...")
 
                         # Auto-detect on results page if not already found
                         if not search_selector:
-                            search_selector = await self._detect_search_input(page)
+                            search_selector = await detect_search_input(page)
 
                         if search_selector:
-                            print(json.dumps({
-                                "event": "portal_detected",
-                                "data": {"url": base_url, "searchSelector": search_selector}
-                            }), flush=True)
+                            await reporter.report_portal_detected(search_selector, base_url)
 
-                        cleaned_html = await page.evaluate("""() => {
+                        cleaned_html = await page.evaluate(r"""() => {
                             const clone = document.body.cloneNode(true);
-                            const toRemove = clone.querySelectorAll('script, style, noscript, svg, img, iframe, header, footer, nav');
-                            toRemove.forEach(el => el.remove());
-                            return clone.innerHTML.substring(0, 300000);
+                            
+                            // Remove unwanted elements
+                            const elementsToRemove = clone.querySelectorAll(
+                               'script, style, noscript, svg, img, iframe, header, footer, nav, link, meta'
+                            );
+                            elementsToRemove.forEach((el) => el.remove());
+                            
+                            // Strip all attributes except href
+                            const stripAttributes = (node) => {
+                               if (node.nodeType === 1) { // Element
+                                 const attrs = Array.from(node.attributes);
+                                 for (const attr of attrs) {
+                                   if (attr.name !== 'href') {
+                                     node.removeAttribute(attr.name);
+                                   }
+                                 }
+                               }
+                               for (let i = 0; i < node.childNodes.length; i++) {
+                                 stripAttributes(node.childNodes[i]);
+                               }
+                            };
+                            
+                            stripAttributes(clone);
+                            
+                            // Clean up whitespace
+                            let html = clone.innerHTML;
+                            html = html.replace(/\s+/g, ' ');
+                            return html.trim().substring(0, 300000);
                         }""")
 
-                        print(json.dumps({
-                            "event": "progress",
-                            "portalId": portal_id,
-                            "message": f"[{keyword}] Cleaned HTML size: {len(cleaned_html)} chars. Contains keyword: {keyword.lower() in cleaned_html.lower()}."
-                        }), flush=True)
+                        await reporter.report_progress(f"[{keyword}] Cleaned HTML size: {len(cleaned_html)} chars. Contained keyword: {keyword.lower() in cleaned_html.lower()}.")
 
-                        if api_key:
-                            new_opps = await self._extract_with_gemini(
-                                api_key, cleaned_html, keyword, portal_id, base_url, page.url
-                            )
-                            opportunities.extend(new_opps)
-                        else:
-                            new_opps = await self._extract_with_ollama(
-                                cleaned_html, keyword, portal_id, base_url, page.url
-                            )
-                            opportunities.extend(new_opps)
+                        # Always extract using local Ollama model (no Gemini)
+                        new_opps = await self._extract_with_ollama(
+                            cleaned_html, keyword, portal_id, base_url, page.url, config, reporter
+                        )
+                        opportunities.extend(new_opps)
 
                     except Exception as kw_err:
                         logger.error(f'Error processing keyword "{keyword}": {str(kw_err)}')
@@ -255,26 +267,13 @@ class GenericSearchStrategy(ScrapingStrategy):
             finally:
                 await browser.close()
 
-        # Deduplicate
-        seen_urls: set = set()
-        unique_opps: List[Dict[str, Any]] = []
+        # Deduplicate by URL
+        seen_urls = set()
+        unique_opps: List[RFPOpportunity] = []
         for opp in opportunities:
-            if opp["url"] not in seen_urls:
-                seen_urls.add(opp["url"])
+            if opp.url not in seen_urls:
+                seen_urls.add(opp.url)
                 unique_opps.append(opp)
-
-        if not unique_opps:
-            unique_opps.append({
-                "id": secrets.token_hex(4),
-                "portalId": portal_id,
-                "title": f"Found result for {keywords}",
-                "description": "Generic search result fallback (Python)",
-                "url": base_url,
-                "publishDate": "",
-                "dueDate": "",
-                "agency": "Unknown",
-                "status": "open"
-            })
 
         return unique_opps
 
@@ -283,209 +282,77 @@ class GenericSearchStrategy(ScrapingStrategy):
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _detect_search_input(page) -> str:
-        """Run heuristic JS to locate a search <input> on the page."""
-        return await page.evaluate("""() => {
-            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])'));
-            for (const input of inputs) {
-                const id = input.id.toLowerCase();
-                const name = (input.getAttribute('name') || '').toLowerCase();
-                const placeholder = (input.getAttribute('placeholder') || '').toLowerCase();
-                const className = input.className.toLowerCase();
-                if (id.includes('search') || id.includes('query') || id.includes('q') ||
-                    name.includes('search') || name.includes('query') || name.includes('q') ||
-                    placeholder.includes('search') || placeholder.includes('find') || placeholder.includes('query') ||
-                    className.includes('search')) {
-                    if (input.id) return `#${input.id}`;
-                    const nameAttr = input.getAttribute('name');
-                    if (nameAttr) return `input[name="${nameAttr}"]`;
-                    if (input.getAttribute('placeholder')) return `input[placeholder="${input.getAttribute('placeholder')}"]`;
-                }
-            }
-            if (inputs.length > 0) {
-                const first = inputs[0];
-                if (first.id) return `#${first.id}`;
-                const firstName = first.getAttribute('name');
-                if (firstName) return `input[name="${firstName}"]`;
-            }
-            return '';
-        }""")
-
-    @staticmethod
-    async def _extract_with_gemini(api_key, cleaned_html, keyword, portal_id, base_url, current_url) -> List[Dict[str, Any]]:
-        """Call Gemini to extract opportunities from *cleaned_html*."""
-        print(json.dumps({
-            "event": "progress",
-            "portalId": portal_id,
-            "message": f"[{keyword}] AI is extracting opportunities from results..."
-        }), flush=True)
-
-        genai.configure(api_key=api_key)
-        prompt = f"""
-        You are an expert data scraper. Below is the HTML of a job search/opportunity results page for the keyword "{keyword}".
-        Extract all listed opportunities or job posts from the HTML.
-        Respond ONLY with a valid JSON array of objects in this exact format:
-        [
-          {{
-            "title": "Job/Opportunity Title",
-            "description": "Brief description of the role or RFP",
-            "url": "URL of the job page if absolute, or relative path",
-            "publishDate": "Publish date if available, otherwise empty",
-            "dueDate": "Due/deadline date if available, otherwise empty",
-            "agency": "Issuing company or agency"
-          }}
-        ]
-
-        If no opportunities are listed, return an empty array: []
-
-        HTML:
-        {cleaned_html}
-        """
-
-        response_text = ""
-        active_model = "gemini-2.5-flash-lite"
-        for fallback in ["gemini-2.5-flash", "gemini-1.5-flash"]:
-            try:
-                print(json.dumps({
-                    "event": "progress",
-                    "portalId": portal_id,
-                    "message": f"[{keyword}] Trying model: {active_model}"
-                }), flush=True)
-                model = genai.GenerativeModel(active_model)
-                response = await model.generate_content_async(prompt)
-                response_text = response.text
-                break
-            except Exception:
-                active_model = fallback
-        else:
-            # Last fallback already set
-            model = genai.GenerativeModel(active_model)
-            response = await model.generate_content_async(prompt)
-            response_text = response.text
-
-        print(json.dumps({
-            "event": "progress",
-            "portalId": portal_id,
-            "message": f"[{keyword}] AI responded using {active_model}. Response length: {len(response_text)} chars."
-        }), flush=True)
-
-        opportunities: List[Dict[str, Any]] = []
-        try:
-            parsed = extract_json(response_text)
-            print(json.dumps({
-                "event": "progress",
-                "portalId": portal_id,
-                "message": f"[{keyword}] Successfully parsed AI response. Found {len(parsed) if isinstance(parsed, list) else 0} items."
-            }), flush=True)
-
-            if isinstance(parsed, list):
-                for item in parsed:
-                    full_url = item.get("url") or current_url
-                    if full_url.startswith("/"):
-                        parsed_base = urlparse(base_url)
-                        full_url = f"{parsed_base.scheme}://{parsed_base.netloc}{full_url}"
-                    elif not full_url.startswith("http"):
-                        parsed_base = urlparse(base_url)
-                        full_url = f"{parsed_base.scheme}://{parsed_base.netloc}/{full_url}"
-
-                    opportunities.append({
-                        "id": secrets.token_hex(4),
-                        "portalId": portal_id,
-                        "title": item.get("title") or "Untitled Opportunity",
-                        "description": item.get("description") or "",
-                        "url": full_url,
-                        "publishDate": item.get("publishDate") or "",
-                        "dueDate": item.get("dueDate") or "",
-                        "agency": item.get("agency") or "Unknown",
-                        "status": "open"
-                    })
-        except Exception as parse_err:
-            print(json.dumps({
-                "event": "progress",
-                "portalId": portal_id,
-                "message": f"[{keyword}] Failed to parse AI response: {str(parse_err)}"
-            }), flush=True)
-
-        return opportunities
-
-    @staticmethod
-    async def _extract_with_ollama(cleaned_html, keyword, portal_id, base_url, current_url) -> List[Dict[str, Any]]:
+    async def _extract_with_ollama(cleaned_html: str, keyword: str, portal_id: str, base_url: str, current_url: str, config: PortalConfig, reporter: ProgressReporter) -> List[RFPOpportunity]:
         """Call local Ollama to extract opportunities from *cleaned_html*."""
-        print(json.dumps({
-            "event": "progress",
-            "portalId": portal_id,
-            "message": f"[{keyword}] Gemini key not found. Trying local Ollama extraction..."
-        }), flush=True)
+        await reporter.report_progress(f"[{keyword}] Initiating local Ollama extraction...")
 
-        ollama_urls = [
-            "http://host.docker.internal:11434",
-            "http://ollama:11434"
-        ]
+        # Get local Ollama host, fallback to default if not configured
+        ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 
-        active_url = None
+        # 1. Fetch available models from Ollama
         available_models = []
+        try:
+            req = urllib.request.Request(f"{ollama_url}/api/tags")
+            with urllib.request.urlopen(req, timeout=3.0) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    available_models = [m["name"] for m in data.get("models", [])]
+        except Exception as e:
+            logger.error(f"Failed to query Ollama models at {ollama_url}: {str(e)}")
 
-        for url in ollama_urls:
-            try:
-                req = urllib.request.Request(f"{url}/api/tags")
-                with urllib.request.urlopen(req, timeout=2.0) as response:
-                    if response.status == 200:
-                        data = json.loads(response.read().decode("utf-8"))
-                        models = [m["name"] for m in data.get("models", [])]
-                        if models:
-                            active_url = url
-                            available_models = models
-                            break
-            except Exception:
-                continue
+        if not available_models:
+            raise RuntimeError(f"Ollama server at {ollama_url} has no models installed, or is unreachable. Please pull an LLM (e.g. gemma or qwen2.5-coder) before starting the hunt.")
 
-        if not active_url:
-            print(json.dumps({
-                "event": "progress",
-                "portalId": portal_id,
-                "message": f"[{keyword}] No active Ollama instances detected or no models installed."
-            }), flush=True)
-            return []
-
-        preferred_models = ["qwen2.5-coder:7b", "gemma", "qwen", "deepseek"]
-        selected_model = available_models[0]
+        # Determine target model: check settings/config or pick the first available local model
+        target_model = None
         
-        for pref in preferred_models:
-            matched = [m for m in available_models if pref in m.lower()]
-            if matched:
-                selected_model = matched[0]
-                break
+        # Read from selector_config settings if present
+        if config.selector_config:
+            try:
+                sel_data = json.loads(config.selector_config)
+                if sel_data.get("modelName"):
+                    target_model = sel_data["modelName"]
+            except Exception:
+                pass
 
-        print(json.dumps({
-            "event": "progress",
-            "portalId": portal_id,
-            "message": f"[{keyword}] Found Ollama at {active_url}. Using model: {selected_model}"
-        }), flush=True)
+        # Fallback to general OLLAMA_MODEL environment variable or first available model
+        if not target_model:
+            target_model = os.environ.get("OLLAMA_MODEL")
+            
+        if not target_model or target_model not in available_models:
+            # Pick first available local model
+            target_model = available_models[0]
+
+        await reporter.report_progress(f"[{keyword}] Selected dynamic Ollama model: {target_model}")
 
         prompt = f"""
-        Extract all listed opportunities or job posts from the HTML for the keyword "{keyword}".
-        Respond ONLY with a valid JSON array of objects in this exact format:
+        Task: Convert the listed job postings in the following HTML snippet into a structured JSON list of objects.
+        Filter jobs based on the keyword "{keyword}".
+        Output ONLY a valid JSON array of objects, containing "title", "description", "url", "publishDate", "dueDate", and "agency".
+        Format matches:
         [
           {{
-            "title": "Job/Opportunity Title",
-            "description": "Brief description of the role or RFP",
-            "url": "URL of the job page if absolute, or relative path",
-            "publishDate": "Publish date if available, otherwise empty",
-            "dueDate": "Due/deadline date if available, otherwise empty",
-            "agency": "Issuing company or agency"
+            "title": "Title of the job posting",
+            "description": "Description of the job",
+            "url": "Link to the job page",
+            "publishDate": "Date published, or empty if unknown",
+            "dueDate": "Closing date, or empty if unknown",
+            "agency": "Hiring company name"
           }}
         ]
+        If no matches are found, output an empty array: []
 
-        If no opportunities are listed, return an empty array: []
-
-        HTML:
+        HTML context:
         {cleaned_html[:50000]}
         """
 
-        opportunities: List[Dict[str, Any]] = []
+        opportunities: List[RFPOpportunity] = []
+        parsed = None
+        success = False
+
         try:
             payload = {
-                "model": selected_model,
+                "model": target_model,
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
@@ -495,50 +362,80 @@ class GenericSearchStrategy(ScrapingStrategy):
             }
             
             req = urllib.request.Request(
-                f"{active_url}/api/generate",
+                f"{ollama_url}/api/generate",
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
             
-            with urllib.request.urlopen(req, timeout=90.0) as response:
+            # Use a total timeout budget of 120 seconds
+            with urllib.request.urlopen(req, timeout=120.0) as response:
                 if response.status == 200:
                     resp_data = json.loads(response.read().decode("utf-8"))
-                    response_text = resp_data.get("response", "")
+                    response_text = resp_data.get("response", "").strip()
                     
-                    print(json.dumps({
-                        "event": "progress",
-                        "portalId": portal_id,
-                        "message": f"[{keyword}] Ollama extraction completed. Parsing response..."
-                    }), flush=True)
-                    
-                    parsed = json.loads(response_text)
-                    if isinstance(parsed, list):
-                        for item in parsed:
-                            full_url = item.get("url") or current_url
-                            if full_url.startswith("/"):
-                                parsed_base = urlparse(base_url)
-                                full_url = f"{parsed_base.scheme}://{parsed_base.netloc}{full_url}"
-                            elif not full_url.startswith("http"):
-                                parsed_base = urlparse(base_url)
-                                full_url = f"{parsed_base.scheme}://{parsed_base.netloc}/{full_url}"
+                    # Check for common refusal patterns
+                    is_refusal = (
+                        "sorry" in response_text.lower() or
+                        "can't assist" in response_text.lower() or
+                        "cannot assist" in response_text.lower() or
+                        "don't have the ability" in response_text.lower() or
+                        "unable to assist" in response_text.lower()
+                    )
 
-                            opportunities.append({
-                                "id": secrets.token_hex(4),
-                                "portalId": portal_id,
-                                "title": item.get("title") or "Untitled Opportunity",
-                                "description": item.get("description") or "",
-                                "url": full_url,
-                                "publishDate": item.get("publishDate") or "",
-                                "dueDate": item.get("dueDate") or "",
-                                "agency": item.get("agency") or "Unknown",
-                                "status": "open"
-                            })
-        except Exception as ollama_err:
-            print(json.dumps({
-                "event": "progress",
-                "portalId": portal_id,
-                "message": f"[{keyword}] Ollama extraction failed: {str(ollama_err)}"
-            }), flush=True)
+                    if not is_refusal:
+                        parsed_data = json.loads(response_text)
+                        
+                        # Verify we didn't receive a JSON-formatted refusal object
+                        is_json_refusal = False
+                        if isinstance(parsed_data, dict) and not isinstance(parsed_data, list):
+                            resp_val = parsed_data.get("response", "")
+                            if isinstance(resp_val, str) and ("sorry" in resp_val.lower() or "assist" in resp_val.lower()):
+                                is_json_refusal = True
+
+                        if not is_json_refusal:
+                            parsed = parsed_data
+                            success = True
+                            await reporter.report_progress(f"[{keyword}] Ollama extraction completed successfully. Parsing response...")
+        except Exception as model_err:
+            logger.error(f"[{keyword}] Model extraction error: {str(model_err)}")
+            await reporter.report_progress(f"[{keyword}] Ollama model extraction failed: {str(model_err)}")
+
+        if success and parsed:
+            items = []
+            if isinstance(parsed, list):
+                items = parsed
+            elif isinstance(parsed, dict):
+                items = parsed.get("opportunities") or parsed.get("jobs") or []
+
+            if isinstance(items, list):
+                for item in items:
+                    try:
+                        # Clean/parse via Pydantic model
+                        raw_ext = OllamaExtraction.model_validate(item)
+                        
+                        full_url = raw_ext.url or current_url
+                        if full_url.startswith("/"):
+                            parsed_base = urlparse(base_url)
+                            full_url = f"{parsed_base.scheme}://{parsed_base.netloc}{full_url}"
+                        elif not full_url.startswith("http"):
+                            parsed_base = urlparse(base_url)
+                            full_url = f"{parsed_base.scheme}://{parsed_base.netloc}/{full_url}"
+
+                        opp = RFPOpportunity(
+                            id=secrets.token_hex(8),  # 64-bit cryptographically secure ID
+                            portalId=portal_id,
+                            title=raw_ext.title or "Untitled Opportunity",
+                            description=raw_ext.description or "",
+                            url=full_url,
+                            publishDate=raw_ext.publishDate or "",
+                            dueDate=raw_ext.dueDate or "",
+                            agency=raw_ext.agency or "Unknown",
+                            status="open"
+                        )
+                        opportunities.append(opp)
+                        await reporter.report_opportunity(opp)
+                    except Exception as val_err:
+                        logger.warning(f"Skipping malformed extraction item: {item}, error: {str(val_err)}")
 
         return opportunities
 

@@ -1,7 +1,41 @@
+use std::collections::HashMap;
+use std::net::TcpStream;
+use std::sync::Mutex;
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::{ShellExt, process::CommandEvent};
 use tracing::{error, info, warn};
+use tokio::sync::oneshot;
+
+pub mod proto {
+    pub mod hunter {
+        tonic::include_proto!("hunter");
+    }
+}
+
+use proto::hunter::hunter_service_client::HunterServiceClient;
+use proto::hunter::{HuntRequest, DetectRequest};
+
+// Thread-safe registry for sidecar subprocesses and active streams
+pub struct HunterRegistry {
+    pub server_child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+    pub active_hunts: Mutex<HashMap<String, oneshot::Sender<()>>>,
+}
+
+impl HunterRegistry {
+    pub fn new() -> Self {
+        Self {
+            server_child: Mutex::new(None),
+            active_hunts: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Default for HunterRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Deserialize, Debug)]
 struct SidecarEvent {
@@ -11,7 +45,6 @@ struct SidecarEvent {
 }
 
 fn find_sidecar_script(sidecar_name: &str) -> Option<String> {
-    // 1. Try starting from current working directory
     if let Ok(mut dir) = std::env::current_dir() {
         loop {
             let test_path = dir.join("sidecars").join(sidecar_name).join("dist/index.js");
@@ -25,27 +58,10 @@ fn find_sidecar_script(sidecar_name: &str) -> Option<String> {
             }
         }
     }
-
-    // 2. Try starting from executable directory
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(mut dir) = exe_path.parent() {
-            loop {
-                let test_path = dir.join("sidecars").join(sidecar_name).join("dist/index.js");
-                if test_path.exists() {
-                    return Some(test_path.to_string_lossy().into_owned());
-                }
-                if let Some(parent) = dir.parent() {
-                    dir = parent;
-                } else {
-                    break;
-                }
-            }
-        }
-    }
-
     None
 }
 
+// Spawns old-style Node/CLI sidecars (e.g. RAG sidecar)
 pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>) -> Result<(), crate::errors::SentinelError> {
     let app_clone = app.clone();
     let sidecar_name_owned = sidecar_name.to_string();
@@ -80,17 +96,12 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
                 match event {
                     CommandEvent::Stdout(line) => {
                         let line_str = String::from_utf8_lossy(&line);
-                        // Parse JSON lines from stdout
                         for l in line_str.lines() {
                             if l.trim().is_empty() { continue; }
                             
                             match serde_json::from_str::<SidecarEvent>(l) {
                                 Ok(se) => {
-                                    // Emit to frontend
                                     let event_name = format!("sentinel://{}/{}", sidecar_name_owned, se.event.replace('_', "-"));
-                                    
-                                    // If payload contains "data", emit that nested value directly.
-                                    // Otherwise, emit the flattened payload.
                                     let final_payload = if let Some(data_val) = se.payload.get("data") {
                                         data_val.clone()
                                     } else {
@@ -102,7 +113,6 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
                                     }
                                 }
                                 Err(_) => {
-                                    // Not JSON, just info log
                                     info!("[{}] {}", sidecar_name_owned, l);
                                 }
                             }
@@ -120,7 +130,6 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
                                 crashed = true;
                             }
                         } else {
-                            // If signal is None and code is None, or signal is present, check if it's normal clean-up
                             error!("Sidecar {} terminated without exit code (possibly signal)", sidecar_name_owned);
                             crashed = true;
                         }
@@ -139,7 +148,6 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
                 retries += 1;
                 if retries >= max_retries {
                     error!("Sidecar {} exceeded max retries, giving up.", sidecar_name_owned);
-                    // Emit crash event to frontend
                     let _ = app_clone.emit("sentinel://system/error", serde_json::json!({
                         "code": "SIDECAR_CRASHED",
                         "message": format!("Sidecar {} crashed permanently.", sidecar_name_owned)
@@ -147,7 +155,6 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
                     break;
                 }
                 
-                // Exponential backoff
                 let delay = std::time::Duration::from_secs(2u64.pow(retries));
                 warn!("Restarting sidecar {} in {} seconds (retry {}/{})", sidecar_name_owned, delay.as_secs(), retries, max_retries);
                 tokio::time::sleep(delay).await;
@@ -156,6 +163,233 @@ pub async fn spawn_sidecar(app: AppHandle, sidecar_name: &str, args: Vec<String>
                 break;
             }
         }
+    });
+
+    Ok(())
+}
+
+// Heuristic Python script finder
+fn find_python_script(script_name: &str) -> Option<String> {
+    if let Ok(mut dir) = std::env::current_dir() {
+        loop {
+            let test_path = dir.join("sidecars").join("hunter").join("src_py").join(script_name);
+            if test_path.exists() {
+                return Some(test_path.to_string_lossy().into_owned());
+            }
+            if let Some(parent) = dir.parent() {
+                dir = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+    }
+    None
+}
+
+// TCP Port Healthcheck
+fn is_port_open(port: u16) -> bool {
+    TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok()
+}
+
+// Dynamic server auto-launcher
+pub async fn ensure_hunter_grpc_server_running(app: AppHandle) -> Result<(), crate::errors::SentinelError> {
+    if is_port_open(50051) {
+        info!("Hunter gRPC server is already running and listening on port 50051.");
+        return Ok(());
+    }
+
+    info!("Hunter gRPC server not running. Launching Python subprocess...");
+
+    let script_path = find_python_script("server.py")
+        .unwrap_or_else(|| "sidecars/hunter/src_py/server.py".to_string());
+        
+    info!("Resolved Python server script path to: {}", script_path);
+
+    let registry = app.state::<HunterRegistry>();
+    
+    // Launch Python server
+    let cmd = app.shell().command("python3")
+        .args(vec![script_path]);
+
+    let (mut rx, child) = match cmd.spawn() {
+        Ok(res) => res,
+        Err(e) => {
+            error!("Failed to spawn Python gRPC server subprocess: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "Failed to spawn Python gRPC server subprocess: {}", e
+            )));
+        }
+    };
+
+    // Store child process handle in registry
+    {
+        let mut guard = registry.server_child.lock().unwrap();
+        *guard = Some(child);
+    }
+
+    // Monitor stdout/stderr logs in a background task
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    let text = String::from_utf8_lossy(&line);
+                    info!("[Hunter Python Server] {}", text.trim());
+                }
+                CommandEvent::Stderr(line) => {
+                    let text = String::from_utf8_lossy(&line);
+                    warn!("[Hunter Python Server STDERR] {}", text.trim());
+                }
+                CommandEvent::Terminated(payload) => {
+                    info!("Hunter Python Server terminated: {:?}", payload);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Wait for the port to open (up to 5 seconds)
+    for i in 0..25 {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if is_port_open(50051) {
+            info!("Hunter gRPC server launched and verified healthy after {}ms.", i * 200);
+            return Ok(());
+        }
+    }
+
+    error!("Hunter gRPC server failed to start listening on port 50051 within 5 seconds.");
+    Err(crate::errors::SentinelError::Sidecar(
+        "Hunter gRPC server failed to respond within timeout.".to_string()
+    ))
+}
+
+// gRPC Hunt RPC Stream Mapping
+pub async fn execute_grpc_hunt(
+    app: AppHandle,
+    portal_id: String,
+    config_json: String,
+    session_id: String,
+) -> Result<(), crate::errors::SentinelError> {
+    // 1. Ensure server is active
+    ensure_hunter_grpc_server_running(app.clone()).await?;
+
+    // 2. Setup Tonic connection
+    let mut client = match HunterServiceClient::connect("http://127.0.0.1:50051").await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to connect to Hunter gRPC service: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "Failed to connect to Hunter gRPC service: {}", e
+            )));
+        }
+    };
+
+    // 3. Create active cancellation channel
+    let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+    let registry = app.state::<HunterRegistry>();
+    {
+        let mut guard = registry.active_hunts.lock().unwrap();
+        guard.insert(session_id.clone(), cancel_tx);
+    }
+
+    // 4. Request the Hunt stream
+    let request = HuntRequest {
+        portal_id: portal_id.clone(),
+        mock_config_json: config_json,
+    };
+
+    let mut stream = match client.hunt(request).await {
+        Ok(response) => response.into_inner(),
+        Err(e) => {
+            error!("gRPC Hunt call failed: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "gRPC Hunt call failed: {}", e
+            )));
+        }
+    };
+
+    let app_clone = app.clone();
+    let session_id_clone = session_id.clone();
+
+    // 5. Process the stream in a background task
+    tauri::async_runtime::spawn(async move {
+        tokio::select! {
+            _ = cancel_rx => {
+                info!("Hunt session {} was cancelled by user.", session_id_clone);
+            }
+            _res = async {
+                while let Some(message) = stream.message().await.ok().flatten() {
+                    let event_name = format!("sentinel://hunter/{}", message.event.replace('_', "-"));
+                    
+                    if let Ok(parsed_payload) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
+                        if let Err(e) = app_clone.emit(&event_name, parsed_payload) {
+                            error!("Failed to emit hunt event {}: {}", event_name, e);
+                        }
+                    } else {
+                        if let Err(e) = app_clone.emit(&event_name, message.json_payload) {
+                            error!("Failed to emit raw hunt event {}: {}", event_name, e);
+                        }
+                    }
+                }
+            } => {
+                info!("gRPC Hunt stream completed for session {}.", session_id_clone);
+            }
+        }
+
+        // Clean up registry entry when done
+        let registry = app_clone.state::<HunterRegistry>();
+        let mut guard = registry.active_hunts.lock().unwrap();
+        guard.remove(&session_id_clone);
+    });
+
+    Ok(())
+}
+
+// gRPC Detect RPC Stream Mapping
+pub async fn execute_grpc_detect(
+    app: AppHandle,
+    url: String,
+) -> Result<(), crate::errors::SentinelError> {
+    ensure_hunter_grpc_server_running(app.clone()).await?;
+
+    let mut client = match HunterServiceClient::connect("http://127.0.0.1:50051").await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to connect to Hunter gRPC service for detect: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "Failed to connect to Hunter gRPC service: {}", e
+            )));
+        }
+    };
+
+    let request = DetectRequest { url };
+    let mut stream = match client.detect(request).await {
+        Ok(response) => response.into_inner(),
+        Err(e) => {
+            error!("gRPC Detect call failed: {}", e);
+            return Err(crate::errors::SentinelError::Sidecar(format!(
+                "gRPC Detect call failed: {}", e
+            )));
+        }
+    };
+
+    let app_clone = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        while let Some(message) = stream.message().await.ok().flatten() {
+            let event_name = format!("sentinel://hunter/{}", message.event.replace('_', "-"));
+            
+            if let Ok(parsed_payload) = serde_json::from_str::<serde_json::Value>(&message.json_payload) {
+                if let Err(e) = app_clone.emit(&event_name, parsed_payload) {
+                    error!("Failed to emit detect event {}: {}", event_name, e);
+                }
+            } else {
+                if let Err(e) = app_clone.emit(&event_name, message.json_payload) {
+                    error!("Failed to emit raw detect event {}: {}", event_name, e);
+                }
+            }
+        }
+        info!("gRPC Detect stream completed.");
     });
 
     Ok(())
