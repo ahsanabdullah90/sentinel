@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface Portal {
