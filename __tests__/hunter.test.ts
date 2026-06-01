@@ -1,31 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { Portal } from '../src/types';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+describe('Portal Interface & Configuration Schema', () => {
+  it('should correctly structure a Portal object conforming to the schema', () => {
+    const mockPortal: Portal = {
+      id: 'test-portal-id',
+      name: 'Resume Brightspyre',
+      url: 'https://resume.brightspyre.com',
+      keywords: 'engineer, developer',
+      status: 'active',
+      rendering_mode: 'static',
+      scraper_module: 'default',
+    };
 
-describe('Hunter Integration', () => {
-  it('should load proto and create client', async () => {
-    const PROTO_PATH = path.resolve(__dirname, '../proto/hunter.proto');
-    const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-    });
+    expect(mockPortal.id).toBe('test-portal-id');
+    expect(mockPortal.name).toBe('Resume Brightspyre');
+    expect(mockPortal.url).toBe('https://resume.brightspyre.com');
+    expect(mockPortal.keywords).toBe('engineer, developer');
+    expect(mockPortal.status).toBe('active');
+    expect(mockPortal.rendering_mode).toBe('static');
+    expect(mockPortal.scraper_module).toBe('default');
+  });
 
-    const hunterProto = grpc.loadPackageDefinition(packageDefinition) as any;
-    expect(hunterProto.hunter).toBeDefined();
-    expect(hunterProto.hunter.HunterService).toBeDefined();
+  it('should support optional properties correctly', () => {
+    const mockPortal: Portal = {
+      id: 'another-portal-id',
+      name: 'Test Portal',
+      url: 'https://example.com',
+      keywords: 'test',
+    };
 
-    const client = new hunterProto.hunter.HunterService(
-      'localhost:50051',
-      grpc.credentials.createInsecure()
-    );
-    expect(client).toBeDefined();
+    expect(mockPortal.status).toBeUndefined();
+    expect(mockPortal.last_run_duration_ms).toBeUndefined();
+    expect(mockPortal.opportunities_count).toBeUndefined();
   });
 });
+

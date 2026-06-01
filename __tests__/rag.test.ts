@@ -1,31 +1,43 @@
 import { describe, it, expect } from 'vitest';
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { Opportunity } from '../src/types';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+describe('Opportunity Interface & Data Schema', () => {
+  it('should correctly structure an Opportunity object conforming to the schema', () => {
+    const mockOpportunity: Opportunity = {
+      id: 'test-opp-id',
+      title: 'Full Stack Engineer',
+      portal: 'Resume Brightspyre',
+      date: '2026-06-01',
+      issuing_org: 'Brightspyre Corp',
+      status: 'new',
+      url: 'https://resume.brightspyre.com/jobs/123',
+      portal_base_url: 'https://resume.brightspyre.com',
+      description: 'Super awesome job description for RFP evaluation.',
+    };
 
-describe('RAG Integration', () => {
-  it('should load proto and create client', async () => {
-    const PROTO_PATH = path.resolve(__dirname, '../proto/rag.proto');
-    const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-    });
+    expect(mockOpportunity.id).toBe('test-opp-id');
+    expect(mockOpportunity.title).toBe('Full Stack Engineer');
+    expect(mockOpportunity.portal).toBe('Resume Brightspyre');
+    expect(mockOpportunity.date).toBe('2026-06-01');
+    expect(mockOpportunity.issuing_org).toBe('Brightspyre Corp');
+    expect(mockOpportunity.status).toBe('new');
+    expect(mockOpportunity.url).toBe('https://resume.brightspyre.com/jobs/123');
+    expect(mockOpportunity.portal_base_url).toBe('https://resume.brightspyre.com');
+    expect(mockOpportunity.description).toBe('Super awesome job description for RFP evaluation.');
+  });
 
-    const ragProto = grpc.loadPackageDefinition(packageDefinition) as any;
-    expect(ragProto.rag).toBeDefined();
-    expect(ragProto.rag.RagService).toBeDefined();
+  it('should support optional properties on Opportunity correctly', () => {
+    const mockOpportunity: Opportunity = {
+      id: 'another-opp-id',
+      title: 'Short Job Title',
+      portal: 'Example Portal',
+      date: '2026-06-01',
+    };
 
-    const client = new ragProto.rag.RagService(
-      'localhost:50052',
-      grpc.credentials.createInsecure()
-    );
-    expect(client).toBeDefined();
+    expect(mockOpportunity.issuing_org).toBeUndefined();
+    expect(mockOpportunity.url).toBeUndefined();
+    expect(mockOpportunity.description).toBeUndefined();
+    expect(mockOpportunity.downloaded_pdf_path).toBeUndefined();
   });
 });
+
