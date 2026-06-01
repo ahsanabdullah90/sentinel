@@ -1,55 +1,39 @@
 # Module: Hunter Sidecar
 
 ## Purpose
-The Hunter sidecar is responsible for discovering and scraping RFP opportunities from various web portals. It uses Playwright for headless browser automation and a recipe-driven architecture with adapters for specific sites. It supports both static HTML parsing and dynamic browser-based scraping.
+The Hunter sidecar is responsible for automated web scraping and RFP portal detection. It identifies search inputs, pagination elements, and portal layouts, scraping RFP details and streaming progress updates back to the Tauri shell.
 
 ## Language & Runtime
 - **Language**: Python 3.11
-- **Framework**: gRPC (asyncio), Playwright
-- **Key Libraries**: grpcio, playwright, pydantic, opentelemetry
+- **Automation Framework**: Playwright (Headless Browser)
+- **Key Libraries**:
+  - `playwright`: Dynamic browser interaction and web scraping.
+  - `pydantic`: Type-safe configuration and data structure parsing.
+  - `httpx`: Lightweight asynchronous HTTP requests for static page detection.
 - **Entry point**: `sidecars/hunter/src_py/server.py`
 
-## Public Interface
-### gRPC Service: `HunterService`
-- `Detect(DetectRequest) returns (stream DetectResponse)`: Analyzes a URL to determine if it's a valid RFP portal and returns a detection report.
-- `Hunt(HuntRequest) returns (stream HuntResponse)`: Performs the actual scraping job for a given portal and streams back discovered opportunities and progress events.
+## IPC Interface (Standard I/O JSON-RPC 2.0)
+The Hunter sidecar communicates purely via standard input (`stdin`) and standard output (`stdout`) stream pipes, redirecting standard output logs to `stderr` to maintain control channel purity.
+- **Methods Received**:
+  - `detect_portal`: Analyzes a URL's markup to determine the portal structure (auth method, login elements).
+  - `start_hunt`: Spawns the web scraper to crawl opportunities based on search keywords.
+- **Events Emitted**:
+  - `portal_detected`: Emits a structured detection report (e.g. login selectors, API endpoints).
+  - `opportunity_found`: Streams details of an identified RFP (title, link, description, release date).
+  - `progress`: Regular visual logs sent to the frontend dashboard.
+  - `error`: Formatted error messages if a page fails to load or authentication fails.
 
 ## Internal Structure
-- `server.py`: gRPC server implementation and service handlers.
-- `scraper_engine.py`: Core scraping logic using Playwright.
-- `portal_runner.py`: Orchestrates the hunting process for a specific portal.
-- `portal_analyzer.py`: Heuristics for detecting portal types and search inputs.
-- `rate_limiter.py`: Token-bucket rate limiter with exponential back-off and CAPTCHA handling.
-- `models.py`: Pydantic models for configuration (`PortalConfig`) and data (`RFPOpportunity`).
-- `adapters/`: Site-specific logic (e.g., `brightspyre.py`) and a `generic.py` fallback.
-- `utils/search_detector.py`: JS-based heuristics for finding search fields.
-
-## Dependencies
-### Internal
-| Module | How consumed |
-|--------|-------------|
-| Proto Contracts | Python stubs generated from `hunter.proto` |
-
-### External
-| Package | Version | Purpose |
-|---------|---------|---------|
-| playwright | 1.44.0 | Browser automation |
-| grpcio | 1.62.1 | gRPC runtime |
-| pydantic | 2.x | Data validation |
-
-## Configuration
-| Variable | Required | Default | Crash if missing? |
-|----------|----------|---------|-------------------|
-| PORT | No | 50051 | No |
-| API_KEY | Yes (prod) | sentinel-secret-api-key | No (uses fallback) |
-| ENV | No | development | No |
-| RUNNING_IN_DOCKER| No | false | No |
-
-## Data Flow
-gRPC Request -> `HunterServiceServicer` -> `PortalRunner` -> `ScraperEngine` -> Playwright (Web) -> `RFPOpportunity` -> gRPC Stream (JSON payload).
+- `server.py`: Listens to `stdin` JSON-RPC requests and dispatches tasks asynchronously.
+- `scraper_engine.py`: Manages browser automation, page navigation, and DOM query selectors.
+- `portal_analyzer.py`: Checks URL headings and markers to auto-detect the portal category.
+- `portal_runner.py`: Controls execution loop for scraping jobs.
+- `rate_limiter.py`: Implements a secure token-bucket rate limiter with exponential back-off and captcha handling.
+- `models.py`: Defines data schemas for portal presets and opportunities.
+- `adapters/`: Generic fallback scraper and custom site-specific scrapers (e.g. BrightSpyre).
 
 ## Startup Sequence
-1. `setup_telemetry` initializes OpenTelemetry.
-2. `HunterServiceServicer` is instantiated.
-3. gRPC server starts, optionally with `AuthInterceptor` in production.
-4. Server binds to port (default 50051) and waits for requests.
+1. The Tauri Rust Shell spawns the Python sidecar as a child process.
+2. The sidecar starts a standard asyncio loop reading from `sys.stdin`.
+3. Standard output (`sys.stdout`) is captured and redirected to `sys.stderr` for logs, preserving standard output exclusively for pure JSON-RPC payloads.
+4. Spawns headless Playwright browser contexts dynamically upon requests.

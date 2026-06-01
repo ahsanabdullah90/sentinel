@@ -1,13 +1,17 @@
 # Module: Tauri Shell
 
 ## Purpose
-The Tauri shell acts as the secure desktop container and orchestrator for the Sentinel RFP Agent. It manages the lifecycle of the application, provides a secure IPC bridge between the frontend and backend services, handles local data persistence via SQLite, and manages gRPC communication with the Python-based sidecars.
+The Tauri shell acts as the secure desktop container and orchestrator for the Sentinel RFP Agent. It manages the application's desktop windowing, provides a secure IPC bridge for the frontend UI, manages the SQLite database files, and acts as the central Process Manager that spawns and monitors the local Python sidecars.
 
 ## Language & Runtime
 - **Language**: Rust
 - **Framework**: Tauri v2
-- **Key Libraries**: Tonic (gRPC client), Tokio (async runtime), Rusqlite (SQLite), Serde (serialization), OpenTelemetry (tracing).
-- **Entry point**: `src-tauri/src/main.rs` (delegates to `lib.rs`)
+- **Key Libraries**:
+  - `rusqlite`: Interface for local SQLite database management.
+  - `tokio`: Async runtime for parallel background sidecar stream processing.
+  - `serde_json`: High-performance JSON serialization for JSON-RPC 2.0.
+  - `tauri-plugin-shell`: Core Tauri plugin used to securely spawn local sidecars.
+- **Entry point**: `src-tauri/src/main.rs` (delegates window and lifecycle setups to `lib.rs`).
 
 ## Public Interface
 ### Tauri Commands (`#[tauri::command]`)
@@ -20,45 +24,27 @@ The Tauri shell acts as the secure desktop container and orchestrator for the Se
 - **AI/RAG**: `analyze_gaps`, `generate_chat_response`, `generate_vision_description`, `ingest_document`, `generate_draft`
 - **Scheduler**: `get_scheduler_timestamp`, `set_scheduler_timestamp`
 
-## Internal Structure
-- `src-tauri/src/commands/`: Command implementations organized by feature (hunting, db, drafting, etc).
-- `src-tauri/src/db/`: SQLite schema (`schema.sql`), initialization logic, and query functions.
-- `src-tauri/src/sidecar.rs`: Sidecar process management and streaming gRPC client implementations.
-- `src-tauri/src/ipc.rs`: gRPC service definitions (via `tonic`) and client connection logic.
-- `src-tauri/src/telemetry.rs`: OpenTelemetry OTLP tracing setup.
-- `src-tauri/src/errors.rs`: Centralized `SentinelError` enum and serialization.
+## Process Manager & Sidecar IPC
+Tauri acts as the exclusive process orchestrator. It does not bind sidecars to local TCP network ports.
+- **IPC Protocol**: Standard JSON-RPC 2.0 over standard input (`stdin`) and standard output (`stdout`) pipes.
+- **Lifecycle Control**: Sidecars are spawned as child processes when a command executes. Dropping the sidecar handle automatically terminates the child process cleanly.
+- **Mutex Lock Safety**: Processes are protected by Mutex locks to synchronize command triggers safely. Mutex poisoning is mitigated by recovering locks under panic via `.lock().unwrap_or_else(|poisoned| poisoned.into_inner())`.
 
 ## Dependencies
 ### Internal
 | Module | How consumed |
 |--------|-------------|
-| Python Sidecars | Consumed via gRPC over localhost (ports 50051-50054) |
-| Proto Contracts | Rust code generated via `tonic-build` from `.proto` files |
+| Python Sidecars | Managed as child processes via standard input/output streams |
 
 ### External
 | Package | Version | Purpose |
 |---------|---------|---------|
-| tauri | 2 | Desktop framework |
-| tonic | 0.11 | gRPC client/server |
-| tokio | 1.38 | Async runtime |
+| tauri | 2.x | Desktop shell framework |
+| tokio | 1.x | Async process monitoring |
 | rusqlite | 0.31 | SQLite interface |
 
-## Configuration
-| Variable | Required | Default | Crash if missing? |
-|----------|----------|---------|-------------------|
-| ENV | No | development | No |
-| API_KEY | Yes (prod) | sentinel-secret-api-key | Yes (panics in prod) |
-| CHROMA_AUTH_TOKEN | Yes (prod) | - | Yes (panics in prod) |
-| REDIS_URL | Yes (prod) | - | Yes (panics in prod) |
-
 ## Data Flow
-- **IPC**: React calls `invoke('command')`, Rust executes handler.
-- **Persistence**: Commands read/write to `sentinel.db` via `rusqlite`.
-- **Sidecars**: Rust creates gRPC clients (`HunterServiceClient`, etc.) and forwards requests. Streaming responses from sidecars are emitted back to frontend as Tauri events.
-
-## Startup Sequence
-1. `validate_env()` checks required production variables.
-2. `telemetry::init_telemetry()` starts OpenTelemetry tracing.
-3. Tauri builder initializes plugins (`shell`, `sql`, `opener`).
-4. SQLite database is initialized/migrated (`db::init()`).
-5. Application starts and waits for frontend `bootstrap_system` call.
+1. **Request**: UI triggers a Tauri command via `invoke('command_name')`.
+2. **IPC Forwarding**: Tauri commands check process availability, format parameters as a JSON-RPC 2.0 request, and write to the sidecar's `stdin`.
+3. **Execution**: Sidecar processes request, writes standard logs to `stderr`, and streams progress/results as JSON-RPC 2.0 messages to `stdout`.
+4. **Response**: Rust reads sidecar's `stdout`, parses the JSON-RPC response, updates `sentinel.db` if necessary, and forwards updates to the UI.

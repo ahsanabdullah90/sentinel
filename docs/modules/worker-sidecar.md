@@ -1,47 +1,28 @@
 # Module: Worker Sidecar
 
 ## Purpose
-The Worker sidecar manages asynchronous background jobs using a Redis-backed queue. It provides a gRPC interface to enqueue jobs and runs a continuous background loop to process them. It is used for tasks like RFP normalization and data enrichment.
+The Worker sidecar handles asynchronous background job execution. Instead of relying on a resource-heavy Redis queue, it uses a lightweight local SQLite database queue (`worker_jobs.db`). It processes background scrapes, proposal draft expansions, and heavy vector ingestion asynchronously, reporting status back to the main Tauri process.
 
 ## Language & Runtime
 - **Language**: Python 3.11
-- **Framework**: gRPC (asyncio)
-- **Key Libraries**: redis, grpcio, opentelemetry
+- **Key Libraries**:
+  - `sqlite3`: Thread-safe transactional queue interface.
+  - `pydantic`: Payload schema enforcement.
 - **Entry point**: `sidecars/worker/src_py/worker.py`
 
-## Public Interface
-### gRPC Service: `WorkerService`
-- `EnqueueJob(JobRequest) returns (JobResponse)`: Pushes a job payload onto the Redis `jobs` list.
+## IPC Interface (Standard I/O JSON-RPC 2.0)
+Communicates with the Tauri host process using standard stdin/stdout stream pipes.
+- **Methods Received**:
+  - `process_job`: Signals the worker to lock a specific job ID in the SQLite database, retrieve parameters, perform processing (e.g. scrape or indexing), and mark the job as completed or failed.
+- **Events Emitted**:
+  - `job_started`: Emitted when parsing begins.
+  - `job_progress`: Progress updates emitted for step-by-step visual display.
+  - `job_completed` / `job_failed`: Status indicators containing final output or error stack.
 
 ## Internal Structure
-- `worker.py`: Combined gRPC server and background worker loop.
-- `process_job`: Logic for validating, normalizing, and hashing job data.
-- `run_worker`: Redis `BLPOP` loop for job consumption.
+- `worker.py`: Manages standard I/O listener loop and coordinates the background polling/execution thread.
+- `process_job`: Main execution function with signature `async def process_job(job_id: int, job_data: dict)`. It reads tasks directly from the shared `worker_jobs.db` SQLite store.
 
-## Dependencies
-### Internal
-| Module | How consumed |
-|--------|-------------|
-| Proto Contracts | Python stubs generated from `worker.proto` (located in the same directory) |
-
-### External
-| Package | Version | Purpose |
-|---------|---------|---------|
-| redis | 5.0.4 | Job queue and result storage |
-| grpcio | 1.62.1 | gRPC runtime |
-
-## Configuration
-| Variable | Required | Default | Crash if missing? |
-|----------|----------|---------|-------------------|
-| PORT | No | 50053 | No |
-| REDIS_URL | Yes | redis://localhost:6379 | No (logs error) |
-
-## Data Flow
-- **Enqueue**: gRPC `EnqueueJob` -> Redis `RPUSH` to `jobs`.
-- **Process**: Redis `BLPOP` from `jobs` -> `process_job` -> Redis `SET` to `results:<id>`.
-
-## Startup Sequence
-1. Telemetry setup.
-2. Background worker task (`run_worker`) is spawned via `asyncio.create_task`.
-3. gRPC server starts on port 50053.
-4. Signal handlers for `SIGTERM`/`SIGINT` are registered for graceful shutdown.
+## SQLite Job Queue Schema (`worker_jobs.db`)
+Stores active worker states locally:
+- **`jobs`**: `id` (INTEGER PRIMARY KEY), `status` (PENDING, RUNNING, COMPLETED, FAILED), `payload` (JSON text), `result` (JSON text), `created_at`, `updated_at`.

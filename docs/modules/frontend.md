@@ -1,62 +1,35 @@
 # Module: Frontend
 
 ## Purpose
-The frontend provides the user interface for the Sentinel RFP Agent. It allows users to manage portals, trigger RFP discovery (hunts), view discovered opportunities, manage a local knowledge base, and perform gap analysis on RFPs. It serves as the orchestration layer, interacting with the Rust-based Tauri shell via IPC.
+The frontend provides the user interface for the Sentinel RFP Agent. It allows users to manage portal configurations, trigger scraping hunts, browse opportunities, manage knowledge documents, review proposal drafts, and view compliance gap analysis. It serves as the visual orchestration layer, interacting with the Rust-based Tauri shell via native IPC.
 
 ## Language & Runtime
 - **Language**: TypeScript (React)
 - **Framework**: Vite
-- **Key Libraries**: Lucide-React (icons), Framer Motion (animations), Tauri API
+- **Key Libraries**:
+  - `@tauri-apps/api/core`: Standard Tauri IPC bridge (invoking commands, subscribing to event emitters).
+  - `lucide-react`: Modern SVG icon pack.
+  - `framer-motion`: Smooth UI micro-animations and page transitions.
 - **Entry point**: `src/main.tsx`
 
 ## Public Interface
-### Pages / Routes (Components)
-- **Main Dashboard** (`App.tsx`): Central hub managing state and global layouts.
-- **Portals** (`PortalConfigModal.tsx`): Managing website discovery targets.
-- **Opportunities** (`OpportunitiesModal.tsx`, `OpportunityDetail.tsx`): Browsing and detailing discovered RFPs.
-- **Knowledge Base** (`KnowledgeBaseDashboard.tsx`): Managing RAG documents.
-- **Gap Report** (`GapReport.tsx`): Compliance analysis UI.
-- **Settings** (`SettingsModal.tsx`): Ollama and system configuration.
+### Views / Components
+- **Main Dashboard** (`App.tsx`): Manages global dashboard layouts and states.
+- **Portal Configurations** (`PortalConfigModal.tsx`): Managing target website feeds and testing IPC connections.
+- **Opportunities** (`OpportunitiesModal.tsx`, `OpportunityDetail.tsx`): Browsing and detailing crawled RFPs.
+- **Knowledge Base** (`KnowledgeBaseDashboard.tsx`): Managing vector store document indices.
+- **Gap Report** (`GapReport.tsx`): Multi-dimensional compliance gap and risk matrix reports with try-catch safety guards.
+- **Settings** (`SettingsModal.tsx`): Configuring model preferences (Ollama settings, model names).
 
 ### Tauri Commands Called (`invoke`)
-- `get_portals`, `save_portal`, `delete_portal`, `toggle_portal_status`
-- `get_opportunities`, `start_hunt_session`, `stop_hunt_session`, `finish_active_hunt`
-- `get_knowledge_items`, `save_knowledge_item`, `delete_knowledge_item`
-- `analyze_rfp_gaps`
-- `check_ollama_status`, `get_ollama_models`
-- `bootstrap_system` (runs `control-unit.sh`)
+- `get_portals`, `save_portal`, `delete_portal`, `toggle_portal_status`, `finish_active_hunt`
+- `get_opportunities_list`, `get_opportunity_detail`, `update_opportunity_status`, `delete_opportunity`
+- `get_proposal_drafts`, `save_proposal_draft`, `update_proposal_draft`, `delete_proposal_draft`
+- `get_knowledge_base`, `save_knowledge_item`, `delete_knowledge_item`
+- `start_hunt_session`, `stop_hunt_session`, `detect_portal`
+- `analyze_gaps`, `generate_chat_response`, `generate_vision_description`, `ingest_document`, `generate_draft`
 
-## Internal Structure
-- `src/components/`: UI components grouped by feature (Drafts, GapReport, KnowledgeBase, Opportunities, PortalConfig, Settings).
-- `src/context/AppContext.tsx`: Main state management (using React Context) for the entire application.
-- `src/types.ts`: Shared TypeScript interfaces and types.
-
-## Dependencies
-### Internal
-| Module | How consumed |
-|--------|-------------|
-| Tauri Shell | Via `@tauri-apps/api/core` `invoke` and `listen` |
-
-### External
-| Package | Version | Purpose |
-|---------|---------|---------|
-| react | ^18 | UI Framework |
-| lucide-react | latest | Icons |
-| tauri-apps/api | ^2 | IPC with Rust shell |
-
-## Configuration
-Read from `AppContext` and passed to Tauri commands.
-| Variable | Required | Default | Crash if missing? |
-|----------|----------|---------|-------------------|
-| Ollama URL | Yes | http://127.0.0.1:11434 | No (handled in UI) |
-| Ollama Model | Yes | (empty) | No |
-
-## Data Flow
-User Action -> React State Update -> Tauri `invoke` -> Rust Shell -> gRPC Sidecar -> Backing Service (Chroma/Ollama/etc).
-Events from Sidecars -> Rust Shell -> Tauri `emit`/`listen` -> React State Update -> UI Render.
-
-## Startup Sequence
-1. `main.tsx` renders `App.tsx` within `AppContextProvider`.
-2. `AppContext` calls `bootstrap_system` via Tauri command.
-3. `bootstrap_system` triggers backend readiness scripts.
-4. UI transitions from "booting" to "ready" once bootstrap completes.
+## State & Data Flow
+1. **Trigger**: Component executes an asynchronous Tauri command using `invoke`.
+2. **IPC execution**: The command returns a Promise. The UI wraps it in `try-catch` blocks to handle any errors elegantly without blocking the renderer thread.
+3. **Reactive Listeners**: Real-time status updates (like scraping progress or LLM generation tokens) are received via the Tauri `listen()` API. Subscriptions are automatically disposed of during unmounting.
