@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Globe, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface Portal {
   id: string;
@@ -19,8 +20,14 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [keywords, setKeywords] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [testSuccess, setTestSuccess] = useState(false);
 
   useEffect(() => {
+    setTestError(null);
+    setTestSuccess(false);
+    setTesting(false);
     if (editingPortal) {
       setName(editingPortal.name);
       setUrl(editingPortal.url);
@@ -33,6 +40,25 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
   }, [editingPortal, isOpen]);
 
   if (!isOpen) return null;
+
+  async function handleTestConnection() {
+    if (!url.trim()) {
+      setTestError('Please enter a URL first.');
+      return;
+    }
+    setTesting(true);
+    setTestError(null);
+    setTestSuccess(false);
+    try {
+      await invoke('detect_portal', { url });
+      setTestSuccess(true);
+    } catch (err: any) {
+      console.error('Portal detection failed:', err);
+      setTestError(err?.message || String(err) || 'Failed to detect portal.');
+    } finally {
+      setTesting(false);
+    }
+  }
 
   function handleSave() {
     onSave({
@@ -116,14 +142,37 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
             >
               URL
             </label>
-            <input
-              value={url}
-              onChange={(e) => {
-                setUrl(e.target.value);
-              }}
-              placeholder="https://..."
-              style={{ width: '100%' }}
-            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                value={url}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                }}
+                placeholder="https://..."
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleTestConnection}
+                disabled={testing}
+                style={{ whiteSpace: 'nowrap', padding: '6px 12px' }}
+              >
+                {testing ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            {testSuccess && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--success-color)', fontSize: '0.75rem', marginTop: '6px' }}>
+                <CheckCircle2 size={12} />
+                <span>Portal detected successfully!</span>
+              </div>
+            )}
+            {testError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#ff453a', fontSize: '0.75rem', marginTop: '6px' }}>
+                <AlertCircle size={12} />
+                <span>{testError}</span>
+              </div>
+            )}
           </div>
           <div>
             <label

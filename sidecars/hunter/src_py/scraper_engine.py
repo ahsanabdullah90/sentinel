@@ -530,30 +530,42 @@ class GenericSearchStrategy(ScrapingStrategy):
         if os.environ.get("RUNNING_IN_DOCKER") == "true":
             parsed_ollama = urlparse(ollama_url)
             if parsed_ollama.hostname in ("localhost", "127.0.0.1", "host.docker.internal"):
-                # Read /proc/net/route to dynamically resolve the container's gateway IP
-                gateway_ip = "172.19.0.1"  # Default fallback
-                try:
-                    with open("/proc/net/route") as f:
-                        for line in f:
-                            fields = line.strip().split()
-                            if len(fields) >= 3 and fields[1] == "00000000":
-                                val = fields[2]
-                                ip_parts = [str(int(val[i:i+2], 16)) for i in range(6, -1, -2)]
-                                gateway_ip = ".".join(ip_parts)
-                                break
-                except Exception:
-                    pass
-                
-                netloc = gateway_ip
-                if parsed_ollama.port:
-                    netloc = f"{gateway_ip}:{parsed_ollama.port}"
-                ollama_url = parsed_ollama._replace(netloc=netloc).geturl()
+                # First try to resolve host.docker.internal natively
+                use_resolved = False
+                if parsed_ollama.hostname == "host.docker.internal":
+                    try:
+                        import socket
+                        socket.gethostbyname("host.docker.internal")
+                        use_resolved = True
+                    except Exception:
+                        pass
+
+                if not use_resolved:
+                    # Read /proc/net/route to dynamically resolve the container's gateway IP
+                    gateway_ip = "172.19.0.1"  # Default fallback
+                    try:
+                        with open("/proc/net/route") as f:
+                            for line in f:
+                                fields = line.strip().split()
+                                if len(fields) >= 3 and fields[1] == "00000000":
+                                    val = fields[2]
+                                    ip_parts = [str(int(val[i:i+2], 16)) for i in range(6, -1, -2)]
+                                    gateway_ip = ".".join(ip_parts)
+                                    break
+                    except Exception:
+                        pass
+                    
+                    netloc = gateway_ip
+                    if parsed_ollama.port:
+                        netloc = f"{gateway_ip}:{parsed_ollama.port}"
+                    ollama_url = parsed_ollama._replace(netloc=netloc).geturl()
 
         # 1. Fetch available models from Ollama
         available_models = await asyncio.to_thread(fetch_ollama_tags_sync, ollama_url)
 
         if not available_models:
-            raise RuntimeError(f"Ollama server at {ollama_url} has no models installed, or is unreachable. Please pull an LLM (e.g. gemma or qwen2.5-coder) before starting the hunt.")
+            await reporter.report_progress(f"[{keyword}] Warning: Ollama server at {ollama_url} has no models installed or is unreachable. Please pull an LLM model (e.g. gemma or qwen2.5-coder) inside Settings.")
+            return []
 
         # Determine target model: check config settings, selector_config, env, or pick first available local model
         target_model = config.ollama_model

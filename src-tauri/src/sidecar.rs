@@ -120,7 +120,7 @@ pub async fn spawn_python_sidecar(
 ) -> Result<Arc<Mutex<CommandChild>>, crate::errors::SentinelError> {
     let child_opt = {
         let registry = app.state::<SidecarRegistry>();
-        let child = registry.processes.lock().unwrap().get(sidecar_name).cloned();
+        let child = registry.processes.lock().unwrap_or_else(|p| p.into_inner()).get(sidecar_name).cloned();
         child
     };
     if let Some(child) = child_opt {
@@ -146,7 +146,7 @@ pub async fn spawn_python_sidecar(
     
     {
         let registry = app.state::<SidecarRegistry>();
-        registry.processes.lock().unwrap().insert(sidecar_name.to_string(), child_arc.clone());
+        registry.processes.lock().unwrap_or_else(|p| p.into_inner()).insert(sidecar_name.to_string(), child_arc.clone());
     }
 
     let (ready_tx, ready_rx) = oneshot::channel::<()>();
@@ -290,7 +290,7 @@ pub async fn spawn_python_sidecar(
                                 let _ = app_clone.emit(&tauri_event, parsed.clone());
                             } else if let Some(req_id) = parsed.get("req_id").and_then(|v| v.as_str()) {
                                 let registry = app_clone.state::<SidecarRegistry>();
-                                let mut guard = registry.responses.lock().unwrap();
+                                let mut guard = registry.responses.lock().unwrap_or_else(|p| p.into_inner());
                                 if let Some(tx) = guard.remove(req_id) {
                                     let _ = tx.send(parsed.clone());
                                 } else {
@@ -311,13 +311,13 @@ pub async fn spawn_python_sidecar(
                 CommandEvent::Terminated(payload) => {
                     info!("Sidecar {} terminated: {:?}", sidecar_name_owned, payload);
                     let registry = app_clone.state::<SidecarRegistry>();
-                    registry.processes.lock().unwrap().remove(&sidecar_name_owned);
+                    registry.processes.lock().unwrap_or_else(|p| p.into_inner()).remove(&sidecar_name_owned);
                     break;
                 }
                 CommandEvent::Error(err) => {
                     error!("Sidecar {} error: {}", sidecar_name_owned, err);
                     let registry = app_clone.state::<SidecarRegistry>();
-                    registry.processes.lock().unwrap().remove(&sidecar_name_owned);
+                    registry.processes.lock().unwrap_or_else(|p| p.into_inner()).remove(&sidecar_name_owned);
                     break;
                 }
                 _ => {}
@@ -352,7 +352,7 @@ pub async fn execute_jsonrpc_method(
     
     let req_str = format!("{}\n", req.to_string());
     
-    let mut child = child_arc.lock().unwrap();
+    let mut child = child_arc.lock().unwrap_or_else(|p| p.into_inner());
     child.write(req_str.as_bytes()).map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
     
     Ok(())
@@ -371,7 +371,7 @@ pub async fn execute_jsonrpc_method_await(
     let (tx, rx) = oneshot::channel();
     {
         let registry = app.state::<SidecarRegistry>();
-        registry.responses.lock().unwrap().insert(req_id.to_string(), tx);
+        registry.responses.lock().unwrap_or_else(|p| p.into_inner()).insert(req_id.to_string(), tx);
     }
     
     let req = serde_json::json!({
@@ -384,7 +384,7 @@ pub async fn execute_jsonrpc_method_await(
     let req_str = format!("{}\n", req.to_string());
     
     {
-        let mut child = child_arc.lock().unwrap();
+        let mut child = child_arc.lock().unwrap_or_else(|p| p.into_inner());
         child.write(req_str.as_bytes()).map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
     }
     

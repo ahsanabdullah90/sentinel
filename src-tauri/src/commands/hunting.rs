@@ -30,7 +30,7 @@ pub async fn stop_hunt_session(
     info!("Stopping hunt session {}...", session_id);
     let registry = app.state::<SidecarRegistry>();
     
-    let mut guard = registry.active_hunts.lock().unwrap();
+    let mut guard = registry.active_hunts.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(cancel_tx) = guard.remove(&session_id) {
         // Trigger cancellation
         let _ = cancel_tx.send(());

@@ -11,16 +11,19 @@ export function GapReport() {
   const [rfpId, setRfpId] = useState('');
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleAnalyze() {
     if (!rfpId.trim()) return;
     setLoading(true);
+    setError(null);
     try {
       // Call mock command
       const result = await invoke('analyze_gaps', { rfpId });
       setGaps(result as Gap[]);
-    } catch (error) {
-      console.error('Gap analysis failed:', error);
+    } catch (err: any) {
+      console.error('Gap analysis failed:', err);
+      setError(err?.message || String(err) || 'Gap analysis failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -29,6 +32,12 @@ export function GapReport() {
   return (
     <div className="card glass gap-report">
       <h3>Compliance & Gap Analysis</h3>
+      {error && (
+        <div style={{ color: '#ff453a', backgroundColor: 'rgba(255, 69, 58, 0.1)', padding: '10px', borderRadius: '8px', marginBottom: '15px', fontSize: '0.9rem', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <AlertTriangle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
       <div className="input-group" style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
         <input
           value={rfpId}
