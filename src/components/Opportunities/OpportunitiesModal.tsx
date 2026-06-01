@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Search, ChevronUp, ChevronDown, Sparkles, ExternalLink, Trash2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 export interface Opportunity {
   id: string;
@@ -437,23 +438,29 @@ export function OpportunitiesModal({
                         Submitted
                       </option>
                     </select>
-                    <a
-                      href={opp.url || opp.portal_base_url || '#'}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      onClick={() => {
+                        const link = opp.url || opp.portal_base_url || '';
+                        if (link) {
+                          openUrl(link).catch(console.error);
+                        }
+                      }}
                       className="btn btn-sm btn-ghost"
                       style={{
                         display: 'inline-flex',
                         gap: '4px',
                         alignItems: 'center',
                         fontSize: '0.75rem',
-                        textDecoration: 'none',
                         color: 'var(--accent-color)',
+                        cursor: 'pointer',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        padding: '4px 8px'
                       }}
                     >
                       <ExternalLink size={12} />
                       Go to Web
-                    </a>
+                    </button>
                     <button
                       className="btn btn-sm btn-ghost"
                       onClick={() => {

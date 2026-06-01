@@ -16,8 +16,6 @@ CREATE TABLE IF NOT EXISTS opportunities (
   title TEXT NOT NULL,
   issuing_org TEXT NOT NULL,
   deadline_at TEXT NOT NULL,
-  url TEXT,
-  description TEXT,
   downloaded_pdf_path TEXT,
   status TEXT NOT NULL DEFAULT 'discovered'
     CHECK(status IN ('discovered','downloaded','ingested','drafted','submitted')),
@@ -42,7 +40,6 @@ CREATE TABLE IF NOT EXISTS gap_items (
 );
 
 -- Dummy Data
-INSERT OR IGNORE INTO portals (id, name, base_url, auth_method, scraper_module) VALUES ('1', 'SAM.gov', 'https://sam.gov', 'public', 'sam_gov');
+INSERT OR IGNORE INTO portals (id, name, base_url, auth_method, scraper_module) VALUES ('1', 'BrightSpyre', 'https://resume.brightspyre.com', 'public', 'brightspyre');
 
-INSERT OR IGNORE INTO opportunities (id, portal_id, title, issuing_org, deadline_at) VALUES ('101', '1', 'Cybersecurity Upgrades', 'DoD', '2026-06-01');
-INSERT OR IGNORE INTO opportunities (id, portal_id, title, issuing_org, deadline_at) VALUES ('102', '1', 'Cloud Infrastructure Maintenance', 'NASA', '2026-06-15');
+INSERT OR IGNORE INTO opportunities (id, portal_id, title, issuing_org, deadline_at) VALUES ('101', '1', 'Hiring of a Public Relations and Media Engagement Firm', 'Karandaaz Pakistan', '2026-06-08');

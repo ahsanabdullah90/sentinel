@@ -1,6 +1,6 @@
 use tauri::AppHandle;
 use crate::errors::SentinelError;
-use crate::sidecar::spawn_sidecar;
+use crate::sidecar::execute_jsonrpc_method;
 
 #[tauri::command]
 pub async fn ingest_document(app: AppHandle, rfp_id: String, file_path: String) -> Result<(), SentinelError> {
@@ -9,12 +9,13 @@ pub async fn ingest_document(app: AppHandle, rfp_id: String, file_path: String) 
         return Err(SentinelError::Io(format!("File not found: {}", file_path)));
     }
 
-    // 2. Spawn RAG sidecar for ingestion
-    spawn_sidecar(app, "rag", vec![
-        "ingest".to_string(),
-        "--rfp".to_string(), rfp_id,
-        "--file".to_string(), file_path
-    ]).await?;
+    // 2. Spawn RAG sidecar for ingestion via JSON-RPC
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let params = serde_json::json!({
+        "rfp_id": rfp_id,
+        "file_path": file_path
+    });
+    execute_jsonrpc_method(app, "rag", "server.py", "ingest", params, &req_id).await?;
 
     Ok(())
 }
@@ -23,12 +24,13 @@ pub async fn ingest_document(app: AppHandle, rfp_id: String, file_path: String) 
 pub async fn generate_draft(app: AppHandle, rfp_id: String, model: Option<String>) -> Result<(), SentinelError> {
     let target_model = model.unwrap_or_else(|| "llama3.1:8b".to_string());
     
-    // Spawn RAG sidecar for drafting
-    spawn_sidecar(app, "rag", vec![
-        "draft".to_string(),
-        "--rfp".to_string(), rfp_id,
-        "--model".to_string(), target_model
-    ]).await?;
+    // Spawn RAG sidecar for drafting via JSON-RPC
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let params = serde_json::json!({
+        "rfp_id": rfp_id,
+        "model": target_model
+    });
+    execute_jsonrpc_method(app, "rag", "server.py", "query", params, &req_id).await?;
 
     Ok(())
 }

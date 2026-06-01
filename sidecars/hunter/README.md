@@ -1,4 +1,4 @@
-# Hunter Sidecar — Unified Python gRPC Scraper Engine
+# Hunter Sidecar — Unified Python Scraper Engine
 
 The **Hunter** module is a local-only, high-performance, rate-limiting-compliant intelligence engine responsible for discovering and scraping RFP opportunities from targeted portals.
 
@@ -6,7 +6,7 @@ The **Hunter** module is a local-only, high-performance, rate-limiting-compliant
 
 1. **Shifted from Node/TypeScript to Python**:
    - The TypeScript scraper has been completely purged to prevent logic duplication.
-   - Core scraping, analysis, and gRPC execution are unified under a strict, optimized Python `asyncio` runtime.
+   - Core scraping and analysis are unified under a strict, optimized Python `asyncio` runtime.
 
 2. **Zero Cloud-LLM Dependecy**:
    - Replaced Gemini/OpenAI completely with **local-only Ollama integration**.
@@ -17,13 +17,13 @@ The **Hunter** module is a local-only, high-performance, rate-limiting-compliant
    - Dedicated `BrightspyreAdapter` for custom parameter mapping and direct search payload handling.
    - Safe `GenericAdapter` fallback with browser heuristics to support any unstructured RFP search page.
 
-4. **Robust Rust Auto-spawner & gRPC client**:
-   - Tauri core (Rust) auto-launches the Python gRPC server subprocess on port `50051` if it is not already running.
-   - Full stream mapping: Rust Tonic client converts real-time gRPC stream events into desktop Tauri frontend event emissions.
+4. **Robust Rust Auto-spawner & IPC**:
+   - Tauri core (Rust) auto-launches the Python sidecar as a subprocess.
+   - Full stream mapping: Rust converts real-time JSON-RPC stdout events into desktop Tauri frontend event emissions.
 
 5. **Graceful Cancellations**:
-   - Stopping a hunt session immediately drops the gRPC stream.
-   - The Python gRPC server detects the channel disconnection, catches the async cancellation, and aborts any active Playwright browser instances immediately, eliminating zombie processes.
+   - Stopping a hunt session immediately terminates the subprocess.
+   - The Rust backend manages the child process lifecycle, preventing zombie processes.
 
 ---
 
@@ -37,7 +37,7 @@ Ensure the following are installed:
 ### Setup Script
 Ensure Python dependencies are ready:
 ```bash
-pip install grpcio grpcio-tools playwright pydantic httpx
+pip install playwright pydantic httpx
 ```
 
 Ensure Playwright browser is ready:
@@ -52,7 +52,7 @@ playwright install chromium
 ```
 sidecars/hunter/
 ├── src_py/
-│   ├── server.py              # Async gRPC Server with cancellation support
+│   ├── server.py              # Async JSON-RPC over stdin/stdout
 │   ├── scraper_engine.py      # Core Playwright & Ollama extraction engine
 │   ├── portal_runner.py       # Orchestrator for real-time progress callbacks
 │   ├── portal_analyzer.py     # Local-only schema and portal field heuristics
@@ -71,23 +71,23 @@ sidecars/hunter/
 ## ⚡ CLI & Test Execution
 
 ### Direct Execution
-Start the gRPC server from the workspace root directory:
+Start the server from the workspace root directory:
 ```bash
 # Add workspace root and proto to PYTHONPATH
-PYTHONPATH=.:./proto python3 sidecars/hunter/src_py/server.py
+PYTHONPATH=. python3 sidecars/hunter/src_py/server.py
 ```
 
 ### Script Execution (CLI mode)
 Run the CLI search directly from the workspace root directory:
 ```bash
-PYTHONPATH=.:./proto python3 sidecars/hunter/src_py/scraper_engine.py --portal brightspyre --query "software" --limit 5
+PYTHONPATH=. python3 sidecars/hunter/src_py/scraper_engine.py --portal brightspyre --query "software" --limit 5
 ```
 
 ---
 
 ## 🔄 Protocol & Event Mapping
 
-Events are pushed in real-time from the Python gRPC server to Rust and emitted to Tauri frontend listeners:
+Events are pushed in real-time from the Python sidecar to Rust via stdout and emitted to Tauri frontend listeners:
 
 | Python Engine Event | Rust Stream Handler | Tauri Frontend Event |
 |:---|:---|:---|

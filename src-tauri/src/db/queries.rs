@@ -33,6 +33,8 @@ pub struct Opportunity {
 
 pub fn get_db_connection(app: &AppHandle) -> Result<Connection, SentinelError> {
     use tauri::Manager;
+    // tauri_plugin_sql resolves "sqlite:sentinel.db" to app_config_dir().
+    // We MUST use the same directory so both systems share one DB file.
     let mut db_path = app.path().app_config_dir()
         .map_err(|e| SentinelError::Database(format!("Failed to get app config dir: {}", e)))?;
     
@@ -210,6 +212,19 @@ pub fn record_opportunity(
     ).map_err(|e| SentinelError::Database(e.to_string()))?;
     
     Ok(true)
+}
+
+pub fn update_opportunity_description(
+    app: &AppHandle,
+    id: String,
+    description: String,
+) -> Result<(), SentinelError> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE opportunities SET description = ? WHERE id = ?",
+        params![description, id]
+    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    Ok(())
 }
 
 pub fn update_portal_selector(app: &AppHandle, base_url: String, config_json: String, rendering_mode: String) -> Result<(), SentinelError> {

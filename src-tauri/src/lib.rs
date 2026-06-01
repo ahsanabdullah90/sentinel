@@ -2,7 +2,6 @@ pub mod commands;
 pub mod db;
 pub mod errors;
 pub mod sidecar;
-pub mod ipc;
 pub mod telemetry;
 
 #[tauri::command]
@@ -122,33 +121,34 @@ async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn analyze_gaps(rfp_id: String) -> Result<Vec<serde_json::Value>, String> {
+async fn analyze_gaps(app: tauri::AppHandle, rfp_id: String) -> Result<Vec<serde_json::Value>, String> {
     // C-4: Validate/sanitize rfp_id via uuid::Uuid prior to executing commands in Tauri backend
     if uuid::Uuid::parse_str(&rfp_id).is_err() {
         return Err("Invalid rfp_id format. Must be a valid UUID.".to_string());
     }
 
-    let mut client = crate::ipc::get_gap_engine_client()
-        .await
-        .map_err(|e| format!("Failed to connect to Gap Engine gRPC service: {}", e))?;
-
-    let payload = crate::ipc::gap_engine::GapRequest {
-        rfp_id: rfp_id.clone(),
-    };
-    let request = crate::ipc::get_api_request(payload);
-
-    let response = client
-        .analyze_gaps(request)
-        .await
-        .map_err(|e| format!("Gap Engine gRPC execution failed: {}", e))?
-        .into_inner();
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let params = serde_json::json!({ "rfp_id": rfp_id });
+    
+    let response = crate::sidecar::execute_jsonrpc_method_await(
+        app,
+        "gap-engine",
+        "server.py",
+        "analyze_gaps",
+        params,
+        &req_id,
+    ).await.map_err(|e| format!("Gap Engine JSON-RPC execution failed: {}", e))?;
 
     let mut list = Vec::new();
-    for gap in response.gaps {
-        list.push(serde_json::json!({
-            "area": gap.area,
-            "description": gap.description,
-        }));
+    if let Some(result) = response.get("result") {
+        if let Some(gaps) = result.get("gaps").and_then(|g| g.as_array()) {
+            for gap in gaps {
+                list.push(serde_json::json!({
+                    "area": gap.get("area").and_then(|v| v.as_str()).unwrap_or_default(),
+                    "description": gap.get("description").and_then(|v| v.as_str()).unwrap_or_default(),
+                }));
+            }
+        }
     }
 
     Ok(list)
@@ -227,65 +227,7 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
         logs.push(String::from("[-] ChromaDB check timed out"));
     }
 
-    // Wait for Hunter sidecar
-    let mut hunter_ok = false;
-    for _ in 0..15 {
-        if TcpStream::connect_timeout(&"127.0.0.1:50051".parse().unwrap(), poll_timeout).is_ok() {
-            hunter_ok = true;
-            break;
-        }
-        sleep(Duration::from_secs(1));
-    }
-    if hunter_ok {
-        logs.push(String::from("[✓] Hunter Engine is ONLINE"));
-    } else {
-        logs.push(String::from("[-] Hunter check timed out"));
-    }
-
-    // Wait for RAG sidecar
-    let mut rag_ok = false;
-    for _ in 0..15 {
-        if TcpStream::connect_timeout(&"127.0.0.1:50052".parse().unwrap(), poll_timeout).is_ok() {
-            rag_ok = true;
-            break;
-        }
-        sleep(Duration::from_secs(1));
-    }
-    if rag_ok {
-        logs.push(String::from("[✓] RAG Engine is ONLINE"));
-    } else {
-        logs.push(String::from("[-] RAG check timed out"));
-    }
-
-    // Wait for Worker sidecar (port 50053)
-    let mut worker_ok = false;
-    for _ in 0..15 {
-        if TcpStream::connect_timeout(&"127.0.0.1:50053".parse().unwrap(), poll_timeout).is_ok() {
-            worker_ok = true;
-            break;
-        }
-        sleep(Duration::from_secs(1));
-    }
-    if worker_ok {
-        logs.push(String::from("[✓] Background Worker is ONLINE"));
-    } else {
-        logs.push(String::from("[-] Background Worker check timed out"));
-    }
-
-    // Wait for Gap Engine sidecar (port 50054)
-    let mut gap_ok = false;
-    for _ in 0..15 {
-        if TcpStream::connect_timeout(&"127.0.0.1:50054".parse().unwrap(), poll_timeout).is_ok() {
-            gap_ok = true;
-            break;
-        }
-        sleep(Duration::from_secs(1));
-    }
-    if gap_ok {
-        logs.push(String::from("[✓] Gap Engine is ONLINE"));
-    } else {
-        logs.push(String::from("[-] Gap Engine check timed out"));
-    }
+    // Sidecars are now spawned on-demand via Tauri shell commands, so we don't check their TCP ports here.
 
     Ok(logs.join("\n"))
 }
@@ -294,7 +236,6 @@ fn validate_env() {
     if std::env::var("ENV").unwrap_or_default() == "production" {
         let api_key = std::env::var("API_KEY");
         let chroma_token = std::env::var("CHROMA_AUTH_TOKEN");
-        let redis_url = std::env::var("REDIS_URL");
         
         let mut missing = Vec::new();
         if api_key.is_err() || api_key.unwrap().is_empty() {
@@ -302,9 +243,6 @@ fn validate_env() {
         }
         if chroma_token.is_err() || chroma_token.unwrap().is_empty() {
             missing.push("CHROMA_AUTH_TOKEN");
-        }
-        if redis_url.is_err() || redis_url.unwrap().is_empty() {
-            missing.push("REDIS_URL");
         }
         
         if !missing.is_empty() {
@@ -331,7 +269,7 @@ pub fn run() {
     });
 
     tauri::Builder::default()
-        .manage(crate::sidecar::HunterRegistry::new())
+        .manage(crate::sidecar::SidecarRegistry::new())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_sql::Builder::default().add_migrations("sqlite:sentinel.db", db::init()).build())
         .plugin(tauri_plugin_opener::init())

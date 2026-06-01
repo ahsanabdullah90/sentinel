@@ -1,3 +1,5 @@
+# NOTE: Architecture Migrated to Local IPC  SQLite. Disregard Docker/gRPC/Redis references.
+
 # Sentinel RFP Agent — Master Implementation Guidelines
 
 > **Status:** Living document. Updated with every sprint.

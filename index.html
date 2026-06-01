@@ -78,6 +78,25 @@
           },
         ];
 
+        const mockKbItems = [
+          {
+            id: 'kb_1',
+            title: 'Company Credentials & Capabilities',
+            content: 'We are a tier-1 cybersecurity and systems integration firm with extensive experience in cloud migration and secure networking.',
+            type: 'text',
+            tags: 'credentials, cloud',
+            created_at: '2026-05-30'
+          },
+          {
+            id: 'kb_2',
+            title: 'Technical Stack Compliance',
+            content: 'Our typical deployment architecture is compliant with SOC2, FedRAMP, and HIPAA frameworks using encrypted storage and zero-trust networks.',
+            type: 'text',
+            tags: 'compliance, tech',
+            created_at: '2026-05-30'
+          }
+        ];
+
         window.__TAURI_INTERNALS__ = {
           plugins: {},
           invoke: async (cmd, args = {}) => {
@@ -104,6 +123,109 @@
 
             if (cmd === 'plugin:sql|close') {
               return true;
+            }
+
+            if (cmd === 'get_portals') {
+              return mockPortals;
+            }
+
+            if (cmd === 'get_opportunities_list') {
+              return mockOpportunities;
+            }
+
+            if (cmd === 'get_opportunity_detail') {
+              const id = args.id;
+              const opp = mockOpportunities.find(o => o.id === id);
+              if (opp) {
+                return {
+                  ...opp,
+                  description: `This is a high-fidelity mock opportunity overview for ${opp.title}. It requires technical expertise, deep integration capabilities, and timely execution under strict governance.`,
+                  downloaded_pdf_path: null,
+                  url: 'https://example.com/rfp',
+                  portal_base_url: 'https://example.com'
+                };
+              }
+              return null;
+            }
+
+            if (cmd === 'get_knowledge_base') {
+              return mockKbItems;
+            }
+
+            if (cmd === 'get_attachments') {
+              return [];
+            }
+
+            if (cmd === 'get_scheduler_timestamp') {
+              return localStorage.getItem('sentinel_scheduler_timestamp') || null;
+            }
+
+            if (cmd === 'set_scheduler_timestamp') {
+              if (args.timestamp) {
+                localStorage.setItem('sentinel_scheduler_timestamp', args.timestamp);
+              }
+              return null;
+            }
+
+            if (cmd === 'start_hunt_session') {
+              console.log('Mocking start of hunt session for portal:', args.portalId);
+              // Trigger a series of mock events on the window to simulate the Python sidecar and progress tracking
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('sentinel://hunter/progress', {
+                  detail: { payload: { portalId: args.portalId, message: 'Starting hunt (Mock Browser Mode)...' } }
+                }));
+              }, 500);
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('sentinel://hunter/progress', {
+                  detail: { payload: { portalId: args.portalId, message: 'Spawning headless chromium browser...' } }
+                }));
+              }, 1500);
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('sentinel://hunter/progress', {
+                  detail: { payload: { portalId: args.portalId, message: '[RFP] Routing directly to target URL...' } }
+                }));
+              }, 3000);
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('sentinel://hunter/progress', {
+                  detail: { payload: { portalId: args.portalId, message: 'Hunt completed successfully' } }
+                }));
+              }, 5000);
+              return 'mock-session-id-123';
+            }
+
+            if (cmd === 'stop_hunt_session') {
+              return null;
+            }
+
+            if (cmd === 'save_portal') {
+              console.log('Mock saving portal:', args.portal);
+              if (args.isEdit) {
+                const idx = mockPortals.findIndex(p => p.id === args.portal.id);
+                if (idx !== -1) mockPortals[idx] = args.portal;
+              } else {
+                mockPortals.push({ ...args.portal, id: Math.random().toString(36).substr(2, 9) });
+              }
+              return null;
+            }
+
+            if (cmd === 'delete_portal') {
+              console.log('Mock deleting portal:', args.id);
+              const idx = mockPortals.findIndex(p => p.id === args.id);
+              if (idx !== -1) mockPortals.splice(idx, 1);
+              return null;
+            }
+
+            if (cmd === 'toggle_portal_status') {
+              const portal = mockPortals.find(p => p.id === args.id);
+              if (portal) {
+                portal.status = args.currentStatus === 'Active' ? 'Idle' : 'Active';
+              }
+              return null;
+            }
+
+            if (cmd === 'finish_active_hunt') {
+              console.log('Mock finished active hunt:', args);
+              return null;
             }
 
             if (cmd === 'get_ollama_models') {

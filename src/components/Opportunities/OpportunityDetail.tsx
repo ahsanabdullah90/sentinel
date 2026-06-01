@@ -17,6 +17,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 interface Opportunity {
   id: string;
@@ -206,6 +207,28 @@ export function OpportunityDetail({
     void loadOpportunityDetails();
     void loadKbItems();
     void loadAttachments(opportunityId);
+
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
+    if (!isTauri) return;
+
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      const unlistenOppUpdated = listen('sentinel://hunter/opportunity-updated', (event: any) => {
+        if (event.payload?.id === opportunityId || event.payload?.data?.id === opportunityId) {
+          void loadOpportunityDetails();
+        }
+      });
+      const unlistenAttDownloaded = listen('sentinel://hunter/attachment-downloaded', (event: any) => {
+        if (event.payload?.opportunityId === opportunityId || event.payload?.data?.opportunityId === opportunityId) {
+          void loadAttachments(opportunityId);
+        }
+      });
+
+      return () => {
+        unlistenOppUpdated.then(f => f?.());
+        unlistenAttDownloaded.then(f => f?.());
+      };
+    });
+
   }, [opportunityId]);
 
   async function loadOpportunityDetails() {
@@ -618,26 +641,30 @@ End of Auto-Generated Proposal Draft.`;
         </button>
 
         {/* Go to Web Button */}
-        <a
-          href={opp.url || opp.portal_base_url || '#'}
-          target="_blank"
-          rel="noreferrer"
+        <button
+          onClick={() => {
+            const link = opp.url || opp.portal_base_url || '';
+            if (link) {
+              openUrl(link).catch(console.error);
+            }
+          }}
           className="btn btn-sm btn-ghost"
           style={{
             display: 'inline-flex',
             gap: '4px',
             alignItems: 'center',
             fontSize: '0.8rem',
-            textDecoration: 'none',
             color: 'var(--accent-color)',
             border: '1px solid rgba(255, 255, 255, 0.1)',
             borderRadius: '6px',
             padding: '4px 10px',
+            cursor: 'pointer',
+            backgroundColor: 'transparent'
           }}
         >
           <ExternalLink size={14} />
           Go to Web
-        </a>
+        </button>
       </div>
 
       <div

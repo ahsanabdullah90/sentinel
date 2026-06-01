@@ -96,7 +96,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const startTimeRef = useRef<number | null>(null);
   const queueRef = useRef<string[]>([]);
   const queueIndexRef = useRef<number>(-1);
-  const triggerNextQueuePortalRef = useRef<() => Promise<void>>(async () => {});
 
   // ---------- Persistent Scheduler Time Helpers ----------
   const loadSchedulerTimestamp = async (): Promise<string | null> => {
@@ -212,8 +211,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const startTime = startTimeRef.current || Date.now();
       const duration = Date.now() - startTime;
 
-      const countRes = opportunities.filter(o => o.portal === portals.find(p => p.id === portalId)?.name).length;
-      const portal = portals.find(p => p.id === portalId);
+      // Load fresh data dynamically to prevent stale closures and avoid effect dependencies
+      const freshPortals = await invoke<Portal[]>('get_portals');
+      const freshOpps = await invoke<Opportunity[]>('get_opportunities_list');
+
+      const portal = freshPortals.find(p => p.id === portalId);
+      const countRes = freshOpps.filter(o => o.portal === portal?.name).length;
       const renderingMode = portal?.selector_config || portalId === 'xbfs76tfq'
         ? 'Browser (Playwright)'
         : 'Static HTML';
@@ -332,6 +335,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Keep refs up-to-date on every render to completely prevent stale closure capture inside mount‑only event listeners
+  const finishActiveHuntRef = useRef(finishActiveHunt);
+  const triggerNextQueuePortalRef = useRef(triggerNextQueuePortal);
+
+  useEffect(() => {
+    finishActiveHuntRef.current = finishActiveHunt;
+    triggerNextQueuePortalRef.current = triggerNextQueuePortal;
+  });
+
   // ---------- Tauri Event Listeners (Refactored to rely on backend auto-persistence) ----------
   useEffect(() => {
     const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
@@ -348,12 +360,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       void loadPortals();
     });
 
+    const unlistenOppUpdated = listen('sentinel://hunter/opportunity-updated', async () => {
+      void loadOpportunities();
+    });
+
+    const unlistenAttDownloaded = listen('sentinel://hunter/attachment-downloaded', async () => {
+      void loadOpportunities();
+    });
+
     const unlistenProgress = listen('sentinel://hunter/progress', async (event: any) => {
       const payload = event.payload;
       if (payload.message) {
         setHuntLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${payload.message}`]);
         if (payload.message === 'Hunt completed successfully') {
-          await finishActiveHunt(payload.portalId);
+          await finishActiveHuntRef.current(payload.portalId);
         }
       }
     });
@@ -370,10 +390,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       unlistenPortal.then(f => f?.());
       unlistenOpp.then(f => f?.());
+      unlistenOppUpdated.then(f => f?.());
+      unlistenAttDownloaded.then(f => f?.());
       unlistenProgress.then(f => f?.());
       unlistenError.then(f => f?.());
     };
-  }, [opportunities, portals]);
+  }, []);
 
   // ---------- Scheduler UI Updates ----------
   useEffect(() => {
@@ -421,9 +443,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [portals, hunting, lastAutoHuntTimestamp]);
 
-  // Keep triggerNextQueuePortalRef up‑to‑date and trigger boot sequence
+  // Trigger boot sequence
   useEffect(() => {
-    triggerNextQueuePortalRef.current = triggerNextQueuePortal;
     void bootstrapEngines();
     void checkOllama();
   }, []);

@@ -71,11 +71,9 @@ class TokenBucketRateLimiter:
         return (min_ms + int(random_float * range_ms)) / 1000.0
 
     async def acquire(self) -> None:
-        """Acquire a token, blocking until one is available.
-
-        Respects the ``SENTINEL_DEV_BYPASS_RATE_LIMIT`` env-var for
-        development/testing.
-        """
+        """Acquire a token, blocking until one is available."""
+        import sys
+        print(f"[rate_limiter] acquire() called. tokens: {self.tokens}, capacity: {self.capacity}, refill_rate: {self.refill_rate}", file=sys.stderr, flush=True)
         if os.environ.get("ENV") != "production" and os.environ.get("SENTINEL_DEV_BYPASS_RATE_LIMIT") == "true":
             logger.warning("[WARN] Rate limit bypassed due to SENTINEL_DEV_BYPASS_RATE_LIMIT=true")
             return

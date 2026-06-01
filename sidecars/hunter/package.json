@@ -1,9 +1,0 @@
-{
-  "name": "hunter",
-  "version": "1.0.0",
-  "description": "Hunter side‑car for portal detection and hunting (Python)",
-  "private": true,
-  "scripts": {
-    "test": "pytest"
-  }
-}

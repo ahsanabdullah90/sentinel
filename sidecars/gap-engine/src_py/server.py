@@ -1,7 +1,6 @@
-"""Gap Engine gRPC Server Module
+"""Gap Engine JSON-RPC Server Module
 
-Hosts the ``GapEngineService`` gRPC service on the port specified by the
-``PORT`` environment variable (default 50054).
+Provides Gap Engine endpoints via standard input/output streams.
 """
 
 import asyncio
@@ -9,18 +8,13 @@ import logging
 import os
 import sys
 import json
-import signal
-import grpc
+import traceback
 
-# Stubs are resolved cleanly via PYTHONPATH
-
-try:
-    import gap_engine_pb2
-    import gap_engine_pb2_grpc
-except ImportError:
-    # Dynamically generate grpc stubs if needed, or assume they are compiled
-    pass
-
+# ---------------------------------------------------------------------------
+# IPC Hijack & Safety Redirection
+# ---------------------------------------------------------------------------
+ipc_out = sys.stdout
+sys.stdout = sys.stderr
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -34,150 +28,114 @@ class JsonFormatter(logging.Formatter):
             log_record["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(log_record)
 
-
-class AuthInterceptor(grpc.aio.ServerInterceptor):
-    def __init__(self, expected_token: str):
-        self._expected_token = expected_token
-
-    async def intercept_service(self, continuation, handler_call_details):
-        if os.environ.get("ENV") == "production":
-            metadata = dict(handler_call_details.invocation_metadata)
-            token = metadata.get("x-sentinel-token") or metadata.get("authorization")
-            if token != self._expected_token:
-                async def abort_call(request, context):
-                    await context.abort(
-                        grpc.StatusCode.UNAUTHENTICATED,
-                        "Missing or invalid Sentinel API token"
-                    )
-                return grpc.unary_unary_rpc_method_handler(abort_call)
-        return await continuation(handler_call_details)
-
-
-def setup_telemetry(service_name: str):
-    """Bootstrap OpenTelemetry Tracing to OTLP collector."""
-    try:
-        from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        from opentelemetry.sdk.resources import Resource
-        
-        resource = Resource.create(attributes={"service.name": service_name})
-        provider = TracerProvider(resource=resource)
-        otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-        exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-        span_processor = BatchSpanProcessor(exporter)
-        provider.add_span_processor(span_processor)
-        trace.set_tracer_provider(provider)
-        logger.info(f"OpenTelemetry tracing initialized for service: {service_name} pointing to {otlp_endpoint}")
-    except Exception as e:
-        logger.warning(f"OpenTelemetry tracing could not be initialized (running without distributed tracing): {str(e)}")
-
-
-class TracingServerInterceptor(grpc.aio.ServerInterceptor):
-    async def intercept_service(self, continuation, handler_call_details):
-        try:
-            from opentelemetry import trace
-            tracer = trace.get_tracer("sentinel.grpc")
-            method = handler_call_details.method
-            with tracer.start_as_current_span(f"gRPC {method}") as span:
-                span.set_attribute("rpc.system", "grpc")
-                span.set_attribute("rpc.method", method)
-                return await continuation(handler_call_details)
-        except Exception:
-            return await continuation(handler_call_details)
-
-
-handler = logging.StreamHandler(sys.stdout)
+handler = logging.StreamHandler(sys.stderr)
 handler.setFormatter(JsonFormatter())
 logger = logging.getLogger("gap_engine.server")
 logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
 
+async def handle_analyze_gaps(params: dict, req_id: str):
+    rfp_id = params.get("rfp_id")
+    if not rfp_id or any(char in rfp_id for char in ["/", "\\", "..", "*", "?", " "]):
+        logger.error(f"Malicious or invalid rfp_id received: '{rfp_id}'")
+        _emit_ipc({
+            "error": {"message": "Invalid rfp_id format"},
+            "req_id": req_id
+        })
+        return
 
-class GapEngineServiceServicer(gap_engine_pb2_grpc.GapEngineServiceServicer if 'gap_engine_pb2_grpc' in sys.modules else object):
-    """Async gRPC servicer implementing the GapEngine contract."""
+    logger.info(f"JSON-RPC AnalyzeGaps request received for RFP ID: {rfp_id}")
 
-    async def AnalyzeGaps(self, request, context):
-        """Analyze gaps for the given RFP ID."""
-        logger.info(f"gRPC AnalyzeGaps request received for RFP ID: {request.rfp_id}")
-        rfp_id = request.rfp_id
+    try:
+        # Static mock gap stubs for now
+        gaps = [
+            {"area": "Security", "description": "Missing details on data encryption at rest."},
+            {"area": "Compliance", "description": "FedRAMP level not specified."}
+        ]
+        
+        _emit_ipc({
+            "result": {
+                "rfp_id": rfp_id,
+                "gaps": gaps
+            },
+            "req_id": req_id
+        })
+    except Exception as e:
+        logger.error(f"Error in JSON-RPC AnalyzeGaps: {str(e)}")
+        _emit_ipc({
+            "error": {"message": str(e)},
+            "req_id": req_id
+        })
 
-        # Validate rfp_id (C-4: Validate/sanitize rfp_id via uuid::Uuid)
-        # In Python side, let's also make sure it has no weird path traversal characters
-        if not rfp_id or any(char in rfp_id for char in ["/", "\\", "..", "*", "?", " "]):
-            logger.error(f"Malicious or invalid rfp_id received: '{rfp_id}'")
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("Invalid rfp_id format")
-            return gap_engine_pb2.GapResponse(rfp_id=rfp_id, gaps=[])
+def _emit_ipc(data: dict):
+    try:
+        ipc_out.write(json.dumps(data) + "\n")
+        ipc_out.flush()
+    except Exception as e:
+        logger.error(f"Failed to write IPC message: {e}")
 
-        try:
-            # Static mock gap stubs for now, fully functional
-            gaps = [
-                gap_engine_pb2.Gap(area="Security", description="Missing details on data encryption at rest."),
-                gap_engine_pb2.Gap(area="Compliance", description="FedRAMP level not specified."),
-            ]
-            return gap_engine_pb2.GapResponse(rfp_id=rfp_id, gaps=gaps)
-        except Exception as e:
-            logger.error(f"Error in gRPC AnalyzeGaps: {str(e)}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(str(e))
-            return gap_engine_pb2.GapResponse(rfp_id=rfp_id, gaps=[])
-
+# ---------------------------------------------------------------------------
+# Main IPC Loop
+# ---------------------------------------------------------------------------
 
 async def serve():
-    """Start the Gap Engine gRPC server."""
-    setup_telemetry("gap-engine-sidecar")
-    interceptors = [TracingServerInterceptor()]
-    if os.environ.get("ENV") == "production":
-        api_key = os.environ.get("API_KEY", "sentinel-secret-api-key")
-        interceptors.append(AuthInterceptor(api_key))
+    logger.info("Gap Engine JSON-RPC Server started over stdin/stdout.")
+    _emit_ipc({"event": "ready"})
 
-    server = grpc.aio.server(interceptors=interceptors)
-    gap_engine_pb2_grpc.add_GapEngineServiceServicer_to_server(
-        GapEngineServiceServicer(), server
-    )
-    
-    # Add standard gRPC health checks
-    from grpc_health.v1 import health, health_pb2, health_pb2_grpc
-    health_servicer = health.HealthServicer()
-    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
-    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-
-    port = os.environ.get("PORT", "50054")
-    bind_address = f"0.0.0.0:{port}"
-    
-    # Secure port binding in production (localhost loopback via Local TCP)
-    if os.environ.get("ENV") == "production":
-        is_docker = os.path.exists("/.dockerenv") or os.environ.get("RUNNING_IN_DOCKER") == "true"
-        if is_docker:
-            server.add_insecure_port(bind_address)
-            logger.info(f"Gap Engine gRPC Server starting on {bind_address} (Docker mode, AuthInterceptor active)")
-        else:
-            server_credentials = grpc.local_server_credentials(grpc.LocalConnectionType.LOCAL_TCP)
-            server.add_secure_port(bind_address, server_credentials)
-            logger.info(f"Gap Engine gRPC Server starting with Secure Local TCP credentials on {bind_address}")
-    else:
-        server.add_insecure_port(bind_address)
-        logger.info(f"Gap Engine gRPC Server starting on bind address: {bind_address} (INSECURE)")
-
+    active_tasks = set()
     loop = asyncio.get_running_loop()
-    async def shutdown():
-        logger.info("SIGTERM received, stopping Gap Engine gRPC server gracefully...")
-        await server.stop(5)
-        logger.info("Gap Engine gRPC server stopped.")
+    reader = asyncio.StreamReader()
+    protocol = asyncio.StreamReaderProtocol(reader)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
 
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
-        except NotImplementedError:
-            pass
+    try:
+        while True:
+            line = await reader.readline()
+            if not line:
+                logger.info("EOF received on stdin. Shutting down.")
+                break
+                
+            line_str = line.decode('utf-8').strip()
+            if not line_str:
+                continue
 
-    await server.start()
-    await server.wait_for_termination()
+            try:
+                req = json.loads(line_str)
+                method = req.get("method")
+                params = req.get("params", {})
+                req_id = req.get("id", "")
 
+                if method == "analyze_gaps":
+                    task = asyncio.create_task(handle_analyze_gaps(params, req_id))
+                    active_tasks.add(task)
+                    task.add_done_callback(active_tasks.discard)
+                else:
+                    logger.warning(f"Unknown JSON-RPC method: {method}")
+                    _emit_ipc({
+                        "error": {"message": f"Unknown method: {method}"},
+                        "req_id": req_id
+                    })
+            except json.JSONDecodeError:
+                logger.warning(f"Received invalid JSON on stdin: {line_str}")
+            except Exception as e:
+                logger.error(f"Error processing IPC request: {str(e)}\n{traceback.format_exc()}")
+                
+    except asyncio.CancelledError:
+        logger.info("Main IPC loop cancelled.")
+    finally:
+        for task in active_tasks:
+            task.cancel()
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+        logger.info("Gap Engine JSON-RPC Server gracefully shutdown.")
 
 if __name__ == "__main__":
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        pass

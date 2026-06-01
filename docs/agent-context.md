@@ -1,3 +1,5 @@
+# NOTE: Architecture Migrated to Local IPC  SQLite. Disregard Docker/gRPC/Redis references.
+
 # Sentinel RFP Agent - Project Status & Agent Context
 
 ## 🎯 Purpose of this Document

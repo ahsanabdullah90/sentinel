@@ -1,30 +1,22 @@
-use opentelemetry::global;
-use opentelemetry::trace::TracerProvider as _;
 use tracing_subscriber::prelude::*;
-use opentelemetry_otlp::WithExportConfig;
+use tracing_subscriber::EnvFilter;
 
 pub fn init_telemetry() {
-    global::set_text_map_propagator(opentelemetry_sdk::propagation::TraceContextPropagator::new());
-    
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint("http://localhost:4317")
-        .build()
-        .expect("Failed to build OTLP span exporter");
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .json() // Use structured JSON format
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(false)
+        .with_thread_ids(true)
+        .with_thread_names(true);
+        
+    let filter_layer = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,sentinel_rfp_lib=debug"));
 
-    let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-        .build();
-
-    global::set_tracer_provider(tracer_provider.clone());
-    let tracer = tracer_provider.tracer("sentinel");
-
-    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-    
     tracing_subscriber::registry()
-        .with(telemetry)
-        .with(tracing_subscriber::fmt::layer())
+        .with(filter_layer)
+        .with(fmt_layer)
         .init();
         
-    println!("OpenTelemetry OTLP initialized in Rust");
+    tracing::info!("Structured JSON logging initialized in Rust");
 }

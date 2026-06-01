@@ -1,21 +1,7 @@
-"""Worker Sidecar Module
+"""Worker JSON-RPC Module
 
-Implements a Redis-backed background job processor and gRPC service for
-the Sentinel platform.
-
-The worker continuously polls a Redis ``jobs`` list via BLPOP and
-processes each job through a concrete task pipeline:
-    1. Parse the job payload.
-    2. Validate required fields.
-    3. Perform a data transformation (normalise, enrich metadata).
-    4. Store the result back in Redis under ``results:{rfp_id}``.
-
-The gRPC ``WorkerService`` exposes an ``EnqueueJob`` RPC that pushes
-jobs onto the Redis queue.
-
-Environment variables:
-    REDIS_URL: Redis connection string (default ``redis://localhost:6379``).
-    PORT: gRPC listen port (default ``50053``).
+Implements a SQLite-backed background job processor and JSON-RPC service
+via standard input/output streams.
 """
 
 import asyncio
@@ -26,7 +12,15 @@ import sys
 import time
 import signal
 import hashlib
+import traceback
+import sqlite3
 from typing import Dict, Any, Optional
+
+# ---------------------------------------------------------------------------
+# IPC Hijack & Safety Redirection
+# ---------------------------------------------------------------------------
+ipc_out = sys.stdout
+sys.stdout = sys.stderr
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -40,100 +34,137 @@ class JsonFormatter(logging.Formatter):
             log_record["exc_info"] = self.formatException(record.exc_info)
         return json.dumps(log_record)
 
-
-def setup_telemetry(service_name: str):
-    """Bootstrap OpenTelemetry Tracing to OTLP collector."""
-    try:
-        from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        from opentelemetry.sdk.resources import Resource
-        
-        resource = Resource.create(attributes={"service.name": service_name})
-        provider = TracerProvider(resource=resource)
-        otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-        exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-        span_processor = BatchSpanProcessor(exporter)
-        provider.add_span_processor(span_processor)
-        trace.set_tracer_provider(provider)
-        logger.info(f"OpenTelemetry tracing initialized for service: {service_name} pointing to {otlp_endpoint}")
-    except Exception as e:
-        logger.warning(f"OpenTelemetry tracing could not be initialized (running without distributed tracing): {str(e)}")
-
-
-class TracingServerInterceptor(grpc.aio.ServerInterceptor):
-    async def intercept_service(self, continuation, handler_call_details):
-        try:
-            from opentelemetry import trace
-            tracer = trace.get_tracer("sentinel.grpc")
-            method = handler_call_details.method
-            with tracer.start_as_current_span(f"gRPC {method}") as span:
-                span.set_attribute("rpc.system", "grpc")
-                span.set_attribute("rpc.method", method)
-                return await continuation(handler_call_details)
-        except Exception:
-            return await continuation(handler_call_details)
-
-
-handler = logging.StreamHandler(sys.stdout)
+handler = logging.StreamHandler(sys.stderr)
 handler.setFormatter(JsonFormatter())
 logger = logging.getLogger("worker")
 logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
-
 # ---------------------------------------------------------------------------
-# Redis helpers (using redis-py async)
+# SQLite helpers
 # ---------------------------------------------------------------------------
 
-try:
-    import redis.asyncio as aioredis
-except ImportError:
-    aioredis = None  # type: ignore[assignment]
-    logger.warning("redis-py[asyncio] not installed – worker will run in stub mode")
+DB_PATH = os.environ.get("SENTINEL_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "..", "..", "worker_jobs.db"))
 
+def init_db():
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rfp_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                result TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Startup recovery: reset stuck 'processing' jobs to 'pending'
+        cur.execute("""
+            UPDATE jobs SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+            WHERE status = 'processing'
+        """)
+        conn.commit()
+        logger.info(f"Initialized SQLite job queue at {DB_PATH}")
+    except Exception as e:
+        logger.error(f"Failed to initialize SQLite job queue: {e}")
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
 
-async def get_redis_client():
-    """Return an async Redis client, or ``None`` if redis-py is missing."""
-    if aioredis is None:
+def enqueue_job_db(rfp_id: str, payload: str):
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO jobs (rfp_id, payload, status)
+            VALUES (?, ?, 'pending')
+        """, (rfp_id, payload))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to enqueue job: {e}")
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
+
+def pop_job_db() -> Optional[Dict[str, Any]]:
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        
+        cur.execute("""
+            SELECT id, rfp_id, payload FROM jobs
+            WHERE status = 'pending'
+            ORDER BY id ASC LIMIT 1
+        """)
+        row = cur.fetchone()
+        if row:
+            job_id = row["id"]
+            cur.execute("UPDATE jobs SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
+            conn.commit()
+            return dict(row)
+        
+        conn.commit()
         return None
-    url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    return aioredis.from_url(url, decode_responses=True)
+    except sqlite3.OperationalError as e:
+        logger.warning(f"sqlite3 OperationalError in pop_job_db: {e}")
+        if conn:
+            conn.rollback()
+        return None
+    except Exception as e:
+        logger.error(f"Error in pop_job_db: {e}")
+        if conn:
+            conn.rollback()
+        return None
+    finally:
+        if conn:
+            conn.close()
 
+def save_result_db(job_id: int, result: str, status: str):
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE jobs
+            SET status = ?, result = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (status, result, job_id))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save result for job {job_id}: {e}")
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
 
 # ---------------------------------------------------------------------------
 # Concrete task processor
 # ---------------------------------------------------------------------------
 
-async def process_job(job_data: Dict[str, Any], redis_client=None) -> Dict[str, Any]:
-    """Process a single job with concrete data transformation.
-
-    Pipeline:
-        1. Validate ``rfp_id`` is present.
-        2. Normalise text fields (strip, lower-case keys).
-        3. Compute a content hash for deduplication.
-        4. Enrich with processing metadata (timestamp, worker version).
-        5. Store the result in Redis if a client is provided.
-
-    Args:
-        job_data: Parsed job payload dict.
-        redis_client: Optional async Redis client for result storage.
-
-    Returns:
-        Enriched result dict.
-
-    Raises:
-        ValueError: If ``rfp_id`` is missing from *job_data*.
-    """
+async def process_job(job_id: int, job_data: Dict[str, Any]) -> Dict[str, Any]:
     rfp_id = job_data.get("rfpId") or job_data.get("rfp_id")
     if not rfp_id:
         raise ValueError("Job payload is missing 'rfpId'")
 
     logger.info(f"Processing job for RFP: {rfp_id}")
 
-    # -- Step 1: Normalise text fields ----------------------------------------
     normalised: Dict[str, Any] = {}
     for key, value in job_data.items():
         norm_key = key.strip()
@@ -142,11 +173,9 @@ async def process_job(job_data: Dict[str, Any], redis_client=None) -> Dict[str, 
         else:
             normalised[norm_key] = value
 
-    # -- Step 2: Compute content hash for dedup --------------------------------
     content_str = json.dumps(normalised, sort_keys=True)
     content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
 
-    # -- Step 3: Enrich with metadata -----------------------------------------
     result: Dict[str, Any] = {
         **normalised,
         "contentHash": content_hash,
@@ -155,173 +184,157 @@ async def process_job(job_data: Dict[str, Any], redis_client=None) -> Dict[str, 
         "status": "processed",
     }
 
-    # -- Step 4: Store result in Redis ----------------------------------------
-    if redis_client is not None:
-        result_key = f"results:{rfp_id}"
-        await redis_client.set(result_key, json.dumps(result), ex=86400)  # TTL 24h
-        logger.info(f"Stored result under key: {result_key}")
-
-    logger.info(f"Job completed for RFP: {rfp_id} (hash={content_hash})")
+    # Save to SQLite
+    def _save():
+        save_result_db(job_id, json.dumps(result), 'completed')
+        
+    await asyncio.get_running_loop().run_in_executor(None, _save)
+    logger.info(f"Job {job_id} completed for RFP: {rfp_id} (hash={content_hash})")
     return result
-
 
 # ---------------------------------------------------------------------------
 # Worker loop
 # ---------------------------------------------------------------------------
 
 async def run_worker():
-    """Continuously poll the Redis ``jobs`` list and process items."""
-    redis_client = await get_redis_client()
-    if redis_client is None:
-        logger.error("Cannot start worker: redis-py is not available")
-        return
-
-    logger.info("Worker started, listening for jobs on 'jobs' list...")
-
+    logger.info("Worker started, polling SQLite queue...")
+    
+    loop = asyncio.get_running_loop()
+    
     while True:
         try:
-            # BLPOP blocks until an item appears (timeout 0 = forever)
-            result = await redis_client.blpop("jobs", timeout=1)
-            if result is None:
+            job_record = await loop.run_in_executor(None, pop_job_db)
+            
+            if job_record is None:
+                await asyncio.sleep(1) # Backoff when empty
                 continue
-            _queue, raw_data = result
-            logger.info(f"Received job from queue: {raw_data[:120]}...")
+                
+            job_id = job_record["id"]
+            rfp_id = job_record["rfp_id"]
+            raw_data = job_record["payload"]
+            
+            logger.info(f"Received job {job_id} from queue: {raw_data[:120]}...")
 
             try:
                 job_data = json.loads(raw_data)
+                # ensure rfpId
+                if "rfpId" not in job_data and "rfp_id" not in job_data:
+                    job_data["rfpId"] = rfp_id
             except json.JSONDecodeError as je:
                 logger.error(f"Invalid JSON in job payload: {je}")
+                await loop.run_in_executor(None, save_result_db, job_id, str(je), 'failed')
                 continue
 
-            await process_job(job_data, redis_client)
+            try:
+                await process_job(job_id, job_data)
+            except Exception as e:
+                logger.error(f"Job processing failed: {e}")
+                await loop.run_in_executor(None, save_result_db, job_id, str(e), 'failed')
 
         except asyncio.CancelledError:
             logger.info("Worker loop cancelled – shutting down")
             break
         except Exception as exc:
-            logger.error(f"Unexpected error in worker loop: {exc}")
-            await asyncio.sleep(2)  # back-off before retry
-
-    await redis_client.aclose()
-
+            logger.error(f"Unexpected error in worker loop: {exc}\n{traceback.format_exc()}")
+            await asyncio.sleep(2)
 
 # ---------------------------------------------------------------------------
-# gRPC service
+# JSON-RPC service
 # ---------------------------------------------------------------------------
 
+def _emit_ipc(data: dict):
+    try:
+        ipc_out.write(json.dumps(data) + "\n")
+        ipc_out.flush()
+    except Exception as e:
+        logger.error(f"Failed to write IPC message: {e}")
 
+async def handle_enqueue_job(params: dict, req_id: str):
+    rfp_id = params.get("rfp_id")
+    payload = params.get("payload", "{}")
+    logger.info(f"JSON-RPC EnqueueJob called for rfp_id={rfp_id}")
 
-try:
-    import worker_pb2
-    import worker_pb2_grpc
-    import grpc
-
-    class WorkerServiceServicer(worker_pb2_grpc.WorkerServiceServicer):
-        """Async gRPC servicer implementing the Worker contract."""
-
-        async def EnqueueJob(self, request, context):
-            """Push a job onto the Redis ``jobs`` list.
-
-            Args:
-                request: ``JobRequest`` with ``rfp_id`` and optional ``payload``.
-
-            Returns:
-                ``JobResponse`` indicating success or failure.
-            """
-            rfp_id = request.rfp_id
-            payload = request.payload or "{}"
-            logger.info(f"EnqueueJob RPC called for rfp_id={rfp_id}")
-
-            try:
-                job_data = json.loads(payload) if payload != "{}" else {}
-            except json.JSONDecodeError:
-                job_data = {}
-            job_data["rfpId"] = rfp_id
-
-            redis_client = await get_redis_client()
-            if redis_client is None:
-                return worker_pb2.JobResponse(
-                    success=False,
-                    message="Redis is not available"
-                )
-
-            await redis_client.rpush("jobs", json.dumps(job_data))
-            await redis_client.aclose()
-
-            return worker_pb2.JobResponse(
-                success=True,
-                message=f"Job enqueued for RFP {rfp_id}"
-            )
-
-    class AuthInterceptor(grpc.aio.ServerInterceptor):
-        def __init__(self, expected_token: str):
-            self._expected_token = expected_token
-
-        async def intercept_service(self, continuation, handler_call_details):
-            if os.environ.get("ENV") == "production":
-                metadata = dict(handler_call_details.invocation_metadata)
-                token = metadata.get("x-sentinel-token") or metadata.get("authorization")
-                if token != self._expected_token:
-                    async def abort_call(request, context):
-                        await context.abort(
-                            grpc.StatusCode.UNAUTHENTICATED,
-                            "Missing or invalid Sentinel API token"
-                        )
-                    return grpc.unary_unary_rpc_method_handler(abort_call)
-            return await continuation(handler_call_details)
-
-    HAS_GRPC = True
-except ImportError:
-    HAS_GRPC = False
-    logger.warning("gRPC dependencies not available – running worker-only mode")
-
-
-async def serve():
-    """Start the Worker gRPC server and background worker loop."""
-    setup_telemetry("worker-sidecar")
-    worker_task = asyncio.create_task(run_worker())
-    tasks = [worker_task]
-    server = None
-
-    if HAS_GRPC:
-        interceptors = [TracingServerInterceptor()]
-        if os.environ.get("ENV") == "production":
-            api_key = os.environ.get("API_KEY", "sentinel-secret-api-key")
-            interceptors.append(AuthInterceptor(api_key))
-
-        server = grpc.aio.server(interceptors=interceptors)
-        worker_pb2_grpc.add_WorkerServiceServicer_to_server(
-            WorkerServiceServicer(), server
-        )
+    try:
+        job_data = json.loads(payload) if payload != "{}" else {}
+    except json.JSONDecodeError:
+        job_data = {}
         
-        # Add standard gRPC health checks
-        from grpc_health.v1 import health, health_pb2, health_pb2_grpc
-        health_servicer = health.HealthServicer()
-        health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
-        health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-
-        port = os.environ.get("PORT", "50053")
-        bind_address = f"0.0.0.0:{port}"
-        
-        # Secure port binding in production (localhost loopback via Local TCP)
-        if os.environ.get("ENV") == "production":
-            server_credentials = grpc.local_server_credentials(grpc.LocalConnectionType.LOCAL_TCP)
-            server.add_secure_port(bind_address, server_credentials)
-            logger.info(f"Worker gRPC Server starting with Secure Local TCP credentials on {bind_address}")
-        else:
-            server.add_insecure_port(bind_address)
-            logger.info(f"Worker gRPC Server starting on bind address: {bind_address} (INSECURE)")
-
-        await server.start()
-        tasks.append(asyncio.create_task(server.wait_for_termination()))
+    if rfp_id:
+        job_data["rfpId"] = rfp_id
 
     loop = asyncio.get_running_loop()
+
+    try:
+        await loop.run_in_executor(None, enqueue_job_db, rfp_id, json.dumps(job_data))
+        _emit_ipc({
+            "result": {
+                "success": True,
+                "message": f"Job enqueued for RFP {rfp_id}"
+            },
+            "req_id": req_id
+        })
+    except Exception as e:
+        logger.error(f"SQLite insert failed: {e}")
+        _emit_ipc({
+            "error": {"message": str(e)},
+            "req_id": req_id
+        })
+
+async def serve():
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, init_db)
+    worker_task = asyncio.create_task(run_worker())
+    
+    logger.info("Worker JSON-RPC Server started over stdin/stdout.")
+    _emit_ipc({"event": "ready"})
+
+    active_tasks = set()
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    protocol = asyncio.StreamReaderProtocol(reader)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+    async def json_rpc_loop():
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    logger.info("EOF received on stdin. Shutting down RPC loop.")
+                    break
+                    
+                line_str = line.decode('utf-8').strip()
+                if not line_str:
+                    continue
+
+                try:
+                    req = json.loads(line_str)
+                    method = req.get("method")
+                    params = req.get("params", {})
+                    req_id = req.get("id", "")
+
+                    if method == "enqueue_job":
+                        task = asyncio.create_task(handle_enqueue_job(params, req_id))
+                        active_tasks.add(task)
+                        task.add_done_callback(active_tasks.discard)
+                    else:
+                        logger.warning(f"Unknown JSON-RPC method: {method}")
+                        _emit_ipc({
+                            "error": {"message": f"Unknown method: {method}"},
+                            "req_id": req_id
+                        })
+                except json.JSONDecodeError:
+                    logger.warning(f"Received invalid JSON on stdin: {line_str}")
+                except Exception as e:
+                    logger.error(f"Error processing IPC request: {str(e)}\n{traceback.format_exc()}")
+        except asyncio.CancelledError:
+            pass
+
+    rpc_task = asyncio.create_task(json_rpc_loop())
+
     async def shutdown():
         logger.info("SIGTERM received, stopping Worker gracefully...")
-        # Cancel worker task
         worker_task.cancel()
-        if server:
-            await server.stop(5)
+        rpc_task.cancel()
         logger.info("Worker gracefully stopped.")
 
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -331,10 +344,17 @@ async def serve():
             pass
 
     try:
-        await asyncio.gather(*tasks)
+        await asyncio.gather(worker_task, rpc_task)
     except asyncio.CancelledError:
         pass
-
+    finally:
+        for task in active_tasks:
+            task.cancel()
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
 
 if __name__ == "__main__":
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        pass

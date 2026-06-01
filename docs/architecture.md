@@ -1,3 +1,5 @@
+# NOTE: Architecture Migrated to Local IPC  SQLite. Disregard Docker/gRPC/Redis references.
+
 # Sentinel Architecture Overview
 
 This document provides a visual and textual overview of the **Sentinel** system after the migration of the backend sidecars to Python.

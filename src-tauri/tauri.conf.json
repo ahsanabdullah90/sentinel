@@ -35,6 +35,11 @@
     ]
   },
   "plugins": {
+    "sql": {
+      "preload": [
+        "sqlite:sentinel.db"
+      ]
+    },
     "updater": {
       "active": false
     }

@@ -36,13 +36,14 @@ async def analyze_portal(url: str) -> dict:
 
             # Clean HTML to save tokens
             cleaned_html = await page.evaluate("""() => {
+                if (!document.body) return "";
                 const clone = document.body.cloneNode(true);
                 const toRemove = clone.querySelectorAll('script, style, noscript, svg, img, iframe');
                 toRemove.forEach(el => el.remove());
                 return clone.innerHTML.substring(0, 50000);
             }""")
 
-            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 
             # 1. Fetch available models from local Ollama
             available_models = []

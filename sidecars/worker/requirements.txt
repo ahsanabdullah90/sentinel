@@ -1,7 +1,1 @@
-grpcio==1.62.1
-protobuf==4.25.3
-redis==5.0.4
-grpcio-health-checking==1.62.1
-opentelemetry-api==1.24.0
-opentelemetry-sdk==1.24.0
-opentelemetry-exporter-otlp==1.24.0
+# SQLite is included in standard library, no external requirements for worker sidecar.
