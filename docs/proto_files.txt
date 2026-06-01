@@ -1,4 +1,0 @@
-proto/gap_engine.proto
-proto/health.proto
-proto/hunter.proto
-proto/rag.proto

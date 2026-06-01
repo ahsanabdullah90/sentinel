@@ -33,5 +33,7 @@ __pycache__/
 sidecars/hunter/scratch_hunt.py
 test_grpc_client.py
 *.db
+.pytest_cache/
+
 
 
