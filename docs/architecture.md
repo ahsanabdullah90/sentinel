@@ -1,22 +1,19 @@
-# NOTE: Architecture Migrated to Local IPC  SQLite. Disregard Docker/gRPC/Redis references.
-
 # Sentinel Architecture Overview
 
-This document provides a visual and textual overview of the **Sentinel** system after the migration of the backend sidecars to Python.
+This document provides an accurate, up-to-date visual and textual overview of the **Sentinel** system. The architecture uses a secure local IPC stream pattern based on **JSON-RPC 2.0** over standard input/output (stdin/stdout), eliminating local network port binding, gRPC, and Redis dependencies.
 
 ---
 
 ## System Components
 
-| Component          | Language                             | Description                                                                               |
-| ------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------- |
-| **Frontend**       | TypeScript (Tauri + React)           | Desktop UI that interacts with the backend.                                               |
-| **Hunter Sidecar** | Python (asyncio, Playwright, Gemini) | Handles portal detection, scraping strategies, and rate‑limiting.                         |
-| **RAG Sidecar**    | Python (Ollama, ChromaDB)            | Ingests documents, stores embeddings, and answers queries.                                |
-| **Gap Engine**     | Python (CLI & stdout capture)        | Fully integrated RFP gap analyzer with JSON event reporting.                              |
-| **Worker**         | Python (redis‑py, gRPC)              | Fully integrated background job processor that consumes tasks from Redis queues.          |
-| **gRPC Protobuf**  | `.proto` files                       | Defines the service contracts between the frontend, hunter, rag, and worker sidecars.     |
-| **Docker Compose** | Docker                               | Orchestrates containers for each sidecar and supporting services (Redis, Chroma, Ollama). |
+| Component          | Technology Stack                     | Communication / Role                                                                          |
+| ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| **Frontend UI**    | React, TypeScript, Lucide, Tailwind  | Desktop application user interface; communicates with the Tauri core using native IPC.       |
+| **Tauri Core**     | Rust (`src-tauri`)                   | Launches and monitors Python sidecars as subprocesses; manages process lifecycle, Mutex locks, and `sentinel.db` SQLite storage. |
+| **Hunter Sidecar** | Python (Playwright, Gemini API)      | Identifies search selectors on target websites, runs scrapers, and streams back matching RFPs. |
+| **RAG Sidecar**    | Python (ChromaDB, Ollama)            | Ingests compliance documents, generates vector embeddings, and executes semantic queries.     |
+| **Gap Engine**     | Python                               | Compliance gap analyzer that parses RFP opportunities to identify structural requirements.    |
+| **Worker Sidecar** | Python (SQLite Queue, `worker_jobs.db`) | Performs background tasks asynchronously, polling a local SQLite job queue database.          |
 
 ---
 
@@ -24,70 +21,90 @@ This document provides a visual and textual overview of the **Sentinel** system 
 
 ```mermaid
 flowchart TD
-    subgraph Frontend[Frontend (TS/Tauri)]
-        FE[React UI]
+    subgraph UI[Frontend (React / TypeScript)]
+        React[React Views]
     end
 
-    subgraph Hunter[Hunter Sidecar (Python)]
-        HL[RateLimiter]
-        HS[ScraperEngine]
-        HA[PortalAnalyzer]
+    subgraph Tauri[Tauri Desktop Core (Rust)]
+        ProcessMgr[Process Manager]
+        MutexLock[Mutex / Process Handles]
+        SQLite[Local SQLite: sentinel.db]
     end
 
-    subgraph RAG[RAG Sidecar (Python)]
-        RI[Ingest]
-        RQ[Query]
-        RC[ChromaClient]
-        RO[OllamaClient]
+    subgraph Python[Python Sidecars (Subprocesses)]
+        subgraph Hunter[Hunter Sidecar]
+            Scraper[Scraper Engine]
+            Playwright[Playwright Web automation]
+        end
+
+        subgraph RAG[RAG Sidecar]
+            Chroma[ChromaDB Client]
+            Ollama[Ollama LLM Client]
+        end
+
+        subgraph Gap[Gap Engine]
+            GapAnalyzer[Gap Analyzer]
+        end
+
+        subgraph Worker[Worker Sidecar]
+            SQLiteQueue[SQLite Job Queue: worker_jobs.db]
+        end
     end
 
-    subgraph Gap[Gap Engine (Python)]
-        GE[Gap Analyzer]
-    end
+    React -->|Tauri Invoke| ProcessMgr
+    ProcessMgr -->|Mutex Lock Safety| MutexLock
+    ProcessMgr -->|Read/Write State| SQLite
 
-    subgraph Worker[Worker (Python)]
-        WK[Redis Worker]
-    end
+    %% Standard I/O stream JSON-RPC 2.0 Connections
+    ProcessMgr <-->|JSON-RPC 2.0 over stdin/stdout| Hunter
+    ProcessMgr <-->|JSON-RPC 2.0 over stdin/stdout| RAG
+    ProcessMgr <-->|JSON-RPC 2.0 over stdin/stdout| Gap
+    ProcessMgr <-->|JSON-RPC 2.0 over stdin/stdout| Worker
 
-    FE -->|gRPC Detect| HL
-    FE -->|gRPC Hunt| HS
-    FE -->|gRPC Ingest| RI
-    FE -->|gRPC Query| RQ
-    FE -->|gRPC AnalyzeGaps| GE
-    FE -->|gRPC ProcessJob| WK
+    Scraper --> Playwright
+    RAG --> Chroma
+    RAG --> Ollama
+    Worker --> SQLiteQueue
 
-    HL --> HS
-    HS --> HA
-    HA -->|detects search selector| HS
-
-    RI --> RC
-    RI --> RO
-    RQ --> RC
-    RQ --> RO
-
-    style Frontend fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style Hunter fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    style RAG fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style Gap fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
-    style Worker fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    style UI fill:#f5f5f7,stroke:#1d1d1f,stroke-width:2px
+    style Tauri fill:#e8f4fc,stroke:#0071e3,stroke-width:2px
+    style Python fill:#f4fbfc,stroke:#008080,stroke-width:2px
+    style Hunter fill:#fff9db,stroke:#fab005,stroke-width:1px
+    style RAG fill:#ebfbee,stroke:#40c057,stroke-width:1px
+    style Gap fill:#fff4e6,stroke:#fd7e14,stroke-width:1px
+    style Worker fill:#fff0f6,stroke:#e64980,stroke-width:1px
 ```
 
 ---
 
-## Data Flow
+## Key Architectural Principles
 
-1. **User initiates a hunt** → Frontend calls `Hunter.Detect` → `PortalAnalyzer` identifies the search selector → `ScraperEngine` performs the search and streams back opportunities.
-2. **User submits a document** → Frontend calls `RAG.Ingest` → `Ingest` stores the document, creates embeddings via `OllamaClient`, and upserts into `ChromaClient`.
-3. **User asks a question** → Frontend calls `RAG.Query` → Context is retrieved from ChromaDB, fed to Ollama to generate an answer.
-4. **Gap analysis** → Frontend calls `GapEngine.analyzeGaps` → Returns a structured gap report.
-5. **Background jobs** → Frontend enqueues a job to Redis → `Worker` continuously polls and processes the job.
+### 1. Zero Network Binding (High Security)
+Unlike traditional architectures that run sidecars on local HTTP or gRPC TCP ports (e.g., `localhost:50051`), Sentinel communicates entirely using standard input (`stdin`) and standard output (`stdout`) pipes. This completely prevents:
+- Port conflict crashes on user machines.
+- Firewalls blockages.
+- Local network snooping or cross-site scripting hijacks of backend engines.
+
+### 2. JSON-RPC 2.0 Protocol Standard
+All standard I/O messages are wrapped in standard compliant JSON-RPC 2.0 structures:
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "detect_portal",
+  "params": { "url": "https://example-rfp.com" },
+  "id": 1
+}
+```
+Replies are returned asynchronously via stdout streams. All debug and execution logs are routed directly through `stderr` to avoid polluting the JSON control channel.
+
+### 3. SQLite-Backed Persistent Queue
+To prevent bloating with heavy third-party cache servers:
+- Background tasks are enqueued into a light, transaction-safe SQLite database (`worker_jobs.db`).
+- The **Worker Sidecar** polls this queue locally and writes progress updates without requiring a Redis daemon.
+
+### 4. Thread-Safe Mutex Recovery
+The Rust process manager uses robust Mutex locks to synchronize command triggers. If a thread panics while holding a process handle, locks are recovered safely via `lock().unwrap_or_else(|poisoned| poisoned.into_inner())` rather than causing application-wide freezes.
 
 ---
 
-## System Status
-
-All core components described in the architecture documents, including the **Worker** and **Gap Engine** services, are fully integrated into the Docker compose orchestration. The native Rust database query optimization (EXISTS) and the secure bootstrapping sequence are fully completed and validated.
-
----
-
-_Updated on 2026‑05‑29._
+_Updated on 2026-06-01._
