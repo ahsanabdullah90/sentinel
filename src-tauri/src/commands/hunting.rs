@@ -40,7 +40,7 @@ pub async fn start_hunt_session(
         "portal_id": portal_id,
         "mock_config_json": config,
     });
-    execute_jsonrpc_method(app, "hunter", "server.py", "hunt", params, &session_id).await?;
+    execute_jsonrpc_method(app, "hunter", "hunt", params, &session_id).await?;
     
     Ok(session_id)
 }
@@ -73,7 +73,7 @@ pub async fn detect_portal(
     info!("Detecting portal at URL: {}", url);
     let req_id = uuid::Uuid::new_v4().to_string();
     let params = serde_json::json!({ "url": url });
-    execute_jsonrpc_method(app, "hunter", "server.py", "detect", params, &req_id).await?;
+    execute_jsonrpc_method(app, "hunter", "detect", params, &req_id).await?;
     Ok(())
 }
 

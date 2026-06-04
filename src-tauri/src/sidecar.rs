@@ -27,96 +27,9 @@ impl Default for SidecarRegistry {
     }
 }
 
-// Heuristic Python script finder
-fn find_python_script(app: &AppHandle, sidecar_name: &str, script_name: &str) -> Option<String> {
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let test_path = resource_dir.join("sidecars").join(sidecar_name).join("src_py").join(script_name);
-        if test_path.exists() {
-            return Some(test_path.to_string_lossy().into_owned());
-        }
-    }
-
-    if let Ok(mut dir) = std::env::current_dir() {
-        loop {
-            let test_path = dir.join("sidecars").join(sidecar_name).join("src_py").join(script_name);
-            if test_path.exists() {
-                return Some(test_path.to_string_lossy().into_owned());
-            }
-            if let Some(parent) = dir.parent() {
-                dir = parent.to_path_buf();
-            } else {
-                break;
-            }
-        }
-    }
-    None
-}
-
-fn determine_python_path(script_path: &str, app: &AppHandle) -> String {
-    let workspace_from_script = std::path::Path::new(script_path)
-        .parent()               // .../src_py/
-        .and_then(|p| p.parent()) // .../sidecar_name/
-        .and_then(|p| p.parent()) // .../sidecars/
-        .and_then(|p| p.parent()) // .../sentinel/ (workspace root)
-        .map(|p| p.to_path_buf());
-
-    if let Some(workspace) = workspace_from_script {
-        workspace.display().to_string()
-    } else {
-        let fallback = std::env::current_dir().ok().and_then(|mut dir| {
-            loop {
-                if dir.join("sidecars").exists() {
-                    return Some(dir.display().to_string());
-                }
-                match dir.parent() {
-                    Some(parent) => dir = parent.to_path_buf(),
-                    None => break,
-                }
-            }
-            None
-        });
-
-        let resource_fallback = app.path().resource_dir().ok().map(|d| d.display().to_string());
-
-        fallback.or(resource_fallback).unwrap_or_default()
-    }
-}
-
-fn determine_python_binary(script_path: &str) -> String {
-    let workspace_root = std::path::Path::new(script_path)
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent());
-
-    let mut found_path = None;
-    if let Some(w) = workspace_root {
-        let paths_to_try = vec![
-            w.join(".venv").join("bin").join("python3"),
-            w.join(".venv").join("bin").join("python"),
-            w.join(".venv").join("Scripts").join("python.exe"),
-        ];
-        for path in paths_to_try {
-            if path.exists() {
-                found_path = Some(path.to_string_lossy().into_owned());
-                break;
-            }
-        }
-    }
-    
-    if let Some(path) = found_path {
-        info!("Using Python interpreter from virtual environment: {}", path);
-        path
-    } else {
-        info!("Virtual environment Python not found. Falling back to system python3.");
-        "python3".to_string()
-    }
-}
-
 pub async fn spawn_python_sidecar(
     app: AppHandle,
     sidecar_name: &str,
-    script_name: &str,
 ) -> Result<Arc<Mutex<Option<CommandChild>>>, crate::errors::SentinelError> {
     let child_opt = {
         let registry = app.state::<SidecarRegistry>();
@@ -162,7 +75,7 @@ pub async fn spawn_python_sidecar(
                     for l in text.lines() {
                         if l.trim().is_empty() { continue; }
                         info!("[{} STDOUT] Raw line received: {}", sidecar_name_owned, l);
-                        if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(l) {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(l) {
                             if let Some(event_str) = parsed.get("event").and_then(|v| v.as_str()).map(|s| s.to_string()) {
                                 if event_str == "ready" {
                                     if let Some(tx) = ready_tx_opt.take() {
@@ -335,12 +248,11 @@ let _ = app_clone.emit(&tauri_event, emit_payload);
 pub async fn execute_jsonrpc_method(
     app: AppHandle,
     sidecar_name: &str,
-    script_name: &str,
     method: &str,
     params: serde_json::Value,
     req_id: &str,
 ) -> Result<(), crate::errors::SentinelError> {
-    let child_arc = spawn_python_sidecar(app.clone(), sidecar_name, script_name).await?;
+    let child_arc = spawn_python_sidecar(app.clone(), sidecar_name).await?;
     
     let req = serde_json::json!({
         "jsonrpc": "2.0",
@@ -364,12 +276,11 @@ pub async fn execute_jsonrpc_method(
 pub async fn execute_jsonrpc_method_await(
     app: AppHandle,
     sidecar_name: &str,
-    script_name: &str,
     method: &str,
     params: serde_json::Value,
     req_id: &str,
 ) -> Result<serde_json::Value, crate::errors::SentinelError> {
-    let child_arc = spawn_python_sidecar(app.clone(), sidecar_name, script_name).await?;
+    let child_arc = spawn_python_sidecar(app.clone(), sidecar_name).await?;
     
     let (tx, rx) = oneshot::channel();
     {

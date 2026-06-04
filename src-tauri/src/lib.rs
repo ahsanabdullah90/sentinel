@@ -135,7 +135,6 @@ async fn analyze_gaps(app: tauri::AppHandle, rfp_id: String) -> Result<Vec<serde
     let response = crate::sidecar::execute_jsonrpc_method_await(
         app,
         "gap-engine",
-        "server.py",
         "analyze_gaps",
         params,
         &req_id,

@@ -15,7 +15,7 @@ pub async fn ingest_document(app: AppHandle, rfp_id: String, file_path: String) 
         "rfp_id": rfp_id,
         "file_path": file_path
     });
-    execute_jsonrpc_method(app, "rag", "server.py", "ingest", params, &req_id).await?;
+    execute_jsonrpc_method(app, "rag", "ingest", params, &req_id).await?;
 
     Ok(())
 }
@@ -30,7 +30,7 @@ pub async fn generate_draft(app: AppHandle, rfp_id: String, model: Option<String
         "rfp_id": rfp_id,
         "model": target_model
     });
-    execute_jsonrpc_method(app, "rag", "server.py", "query", params, &req_id).await?;
+    execute_jsonrpc_method(app, "rag", "query", params, &req_id).await?;
 
     Ok(())
 }
