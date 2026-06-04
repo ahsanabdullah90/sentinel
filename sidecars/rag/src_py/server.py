@@ -11,9 +11,9 @@ import json
 import traceback
 import tempfile
 
-from .ingest import ingest_document
-from .ollama_client import OllamaClient
-from .chroma_client import ChromaClient
+from sidecars.rag.src_py.ingest import ingest_document
+from sidecars.rag.src_py.ollama_client import OllamaClient
+from sidecars.rag.src_py.chroma_client import ChromaClient
 
 # ---------------------------------------------------------------------------
 # IPC Hijack & Safety Redirection

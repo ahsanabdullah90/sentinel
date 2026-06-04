@@ -115,6 +115,9 @@ cd ../..
 success "All JavaScript and Playwright sidecar dependencies are successfully provisioned."
 
 title "[5/5] Compiling Standalone Production Desktop Bundle"
+info "Compiling Python sidecars into standalone binaries..."
+./scripts/compile_sidecars.sh
+
 info "Building frontend production assets..."
 npm run build
 

@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 pub mod commands;
 pub mod db;
 pub mod errors;
@@ -268,7 +270,7 @@ pub fn run() {
         telemetry::init_telemetry();
     });
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(crate::sidecar::SidecarRegistry::new())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_sql::Builder::default().add_migrations("sqlite:sentinel.db", db::init()).build())
@@ -314,6 +316,23 @@ pub fn run() {
             commands::db_commands::save_knowledge_item,
             commands::db_commands::delete_knowledge_item,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        // Ensure all spawned sidecar processes are terminated before the app exits
+        if let tauri::RunEvent::Exit { .. } = event {
+            let registry = app_handle.state::<crate::sidecar::SidecarRegistry>();
+            // Drain the processes map, killing each child
+            let mut guard = registry.processes.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for (_, child_arc) in guard.iter() {
+                if let Ok(mut g) = child_arc.lock() {
+                    if let Some(child) = g.take() {
+                        let _ = child.kill(); // ignore errors – best‑effort cleanup
+                    }
+                }
+            }
+            guard.clear();
+        }
+    });
 }

@@ -50,13 +50,13 @@ logger.propagate = False
 async def handle_detect(params: dict, req_id: str):
     url = params.get("url")
     if not url:
-        _emit_ipc({"event": "error", "json_payload": '{"message": "Missing url"}', "req_id": req_id})
+        await _emit_ipc({"event": "error", "json_payload": '{"message": "Missing url"}', "req_id": req_id})
         return
 
     logger.info(f"JSON-RPC Detect request received for URL: {url}")
     try:
         report = await analyze_portal(url)
-        _emit_ipc({
+        await _emit_ipc({
             "event": "portal_detected",
             "json_payload": json.dumps(report),
             "payload_type": 0,
@@ -71,7 +71,7 @@ async def handle_detect(params: dict, req_id: str):
             "req_id": req_id
         })
     finally:
-        _emit_ipc({"event": "detect_complete", "req_id": req_id})
+        await _emit_ipc({"event": "detect_complete", "req_id": req_id})
 
 async def handle_hunt(params: dict, req_id: str):
     portal_id = params.get("portal_id", "")
@@ -118,7 +118,7 @@ async def handle_hunt(params: dict, req_id: str):
         return
 
     async def on_event(event_name: str, payload: dict):
-        _emit_ipc({
+        await _emit_ipc({
             "event": event_name,
             "json_payload": json.dumps(payload),
             "payload_type": 0,
@@ -128,7 +128,7 @@ async def handle_hunt(params: dict, req_id: str):
     runner = PortalRunner()
     try:
         await runner.run_portal(config, on_event=on_event)
-        _emit_ipc({
+        await _emit_ipc({
             "event": "hunt_complete",
             "json_payload": json.dumps({"success": True}),
             "payload_type": 0,
@@ -136,19 +136,22 @@ async def handle_hunt(params: dict, req_id: str):
         })
     except Exception as e:
         logger.error(f"Error executing hunt: {str(e)}")
-        _emit_ipc({
+        await _emit_ipc({
             "event": "error",
             "json_payload": json.dumps({"message": str(e)}),
             "payload_type": 0,
             "req_id": req_id
         })
-        _emit_ipc({"event": "hunt_complete", "req_id": req_id})
+        await _emit_ipc({"event": "hunt_complete", "req_id": req_id})
 
-def _emit_ipc(data: dict):
-    """Writes a single JSON line to the IPC output stream."""
+async def _emit_ipc(data: dict):
+    """Writes a single JSON line to the IPC output stream without blocking the event loop."""
     try:
-        ipc_out.write(json.dumps(data) + "\n")
-        ipc_out.flush()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: (
+            ipc_out.write(json.dumps(data) + "\n"),
+            ipc_out.flush()
+        ))
     except Exception as e:
         logger.error(f"Failed to write IPC message: {e}")
 
@@ -160,7 +163,7 @@ async def serve():
     logger.info("Hunter JSON-RPC Server started over stdin/stdout.")
     
     # Send a ready signal so the Rust parent knows we're up
-    _emit_ipc({"event": "ready"})
+    await _emit_ipc({"event": "ready"})
 
     # Setup a background task group to handle concurrent requests
     active_tasks = set()
@@ -203,7 +206,7 @@ async def serve():
                     task.add_done_callback(active_tasks.discard)
                 else:
                     logger.warning(f"Unknown JSON-RPC method: {method}")
-                    _emit_ipc({
+                    await _emit_ipc({
                         "event": "error",
                         "json_payload": json.dumps({"message": f"Unknown method: {method}"}),
                         "payload_type": 0,

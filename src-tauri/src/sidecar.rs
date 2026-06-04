@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 use tokio::sync::oneshot;
 
 pub struct SidecarRegistry {
-    pub processes: Mutex<HashMap<String, Arc<Mutex<CommandChild>>>>,
+    pub processes: Mutex<HashMap<String, Arc<Mutex<Option<CommandChild>>>>>,
     pub active_hunts: Mutex<HashMap<String, oneshot::Sender<()>>>,
     pub responses: Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>,
 }
@@ -117,7 +117,7 @@ pub async fn spawn_python_sidecar(
     app: AppHandle,
     sidecar_name: &str,
     script_name: &str,
-) -> Result<Arc<Mutex<CommandChild>>, crate::errors::SentinelError> {
+) -> Result<Arc<Mutex<Option<CommandChild>>>, crate::errors::SentinelError> {
     let child_opt = {
         let registry = app.state::<SidecarRegistry>();
         let child = registry.processes.lock().unwrap_or_else(|p| p.into_inner()).get(sidecar_name).cloned();
@@ -127,22 +127,20 @@ pub async fn spawn_python_sidecar(
         return Ok(child);
     }
 
-    info!("Launching Python sidecar: {}", sidecar_name);
+    let (mut rx, child) = match app.shell().sidecar(sidecar_name) {
+        Ok(sidecar_cmd) => {
+            info!("Spawning sidecar as compiled binary: {}", sidecar_name);
+            sidecar_cmd.spawn().map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?
+        }
+        Err(err) => {
+            // If the compiled sidecar binary is not available, this is a critical error in production.
+            // We return an explicit error to avoid falling back to a system Python interpreter, which would break portability.
+            error!("Compiled sidecar '{}' not found or failed to load: {}", sidecar_name, err);
+            return Err(crate::errors::SentinelError::Sidecar(format!("Compiled sidecar '{}' missing", sidecar_name)));
+        }
+    };
 
-    let script_path = find_python_script(&app, sidecar_name, script_name)
-        .unwrap_or_else(|| format!("sidecars/{}/src_py/{}", sidecar_name, script_name));
-
-    let python_binary = determine_python_binary(&script_path);
-    let python_path = determine_python_path(&script_path, &app);
-
-    let mut cmd = app.shell().command(python_binary).args(vec![script_path]);
-    if !python_path.is_empty() {
-        cmd = cmd.env("PYTHONPATH", python_path);
-    }
-
-    let (mut rx, child) = cmd.spawn().map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
-
-    let child_arc = Arc::new(Mutex::new(child));
+    let child_arc = Arc::new(Mutex::new(Some(child)));
     
     {
         let registry = app.state::<SidecarRegistry>();
@@ -210,7 +208,7 @@ pub async fn spawn_python_sidecar(
                                             let portal_id = opp.get("portalId").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "1".to_string());
                                             let title = opp.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                                             let agency = opp.get("agency").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "Unknown Agency".to_string());
-                                            let due_date = opp.get("dueDate").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| "2026-06-30".to_string());
+                                            let due_date = opp.get("dueDate").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                                             let url = opp.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                                             let description = opp.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                                             
@@ -276,18 +274,19 @@ pub async fn spawn_python_sidecar(
                                         }
                                     }
                                 }
-                                // Flatten json_payload into the root object so the frontend can read fields like `message` directly
-                                if let Some(payload_str) = parsed.get("json_payload").and_then(|v| v.as_str()) {
-                                    if let Ok(inner_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
-                                        if let (Some(obj), Some(inner_obj)) = (parsed.as_object_mut(), inner_json.as_object()) {
-                                            for (k, v) in inner_obj.iter() {
-                                                obj.insert(k.clone(), v.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                let _ = app_clone.emit(&tauri_event, parsed.clone());
+// Isolate payload parsing to avoid mutating `parsed`
+let mut emit_payload = parsed.clone();
+if let Some(payload_str) = parsed.get("json_payload").and_then(|v| v.as_str()) {
+    if let Ok(inner_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
+        if let (Some(obj), Some(inner_obj)) = (emit_payload.as_object_mut(), inner_json.as_object()) {
+            // Merge inner fields into the top‑level payload for the frontend
+            for (k, v) in inner_obj.iter() {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
+let _ = app_clone.emit(&tauri_event, emit_payload);
                             } else if let Some(req_id) = parsed.get("req_id").and_then(|v| v.as_str()) {
                                 let registry = app_clone.state::<SidecarRegistry>();
                                 let mut guard = registry.responses.lock().unwrap_or_else(|p| p.into_inner());
@@ -352,8 +351,12 @@ pub async fn execute_jsonrpc_method(
     
     let req_str = format!("{}\n", req.to_string());
     
-    let mut child = child_arc.lock().unwrap_or_else(|p| p.into_inner());
-    child.write(req_str.as_bytes()).map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
+    let mut guard = child_arc.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(ref mut child) = *guard {
+        child.write(req_str.as_bytes()).map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
+    } else {
+        return Err(crate::errors::SentinelError::Sidecar("Process has been terminated".to_string()));
+    }
     
     Ok(())
 }
@@ -384,8 +387,12 @@ pub async fn execute_jsonrpc_method_await(
     let req_str = format!("{}\n", req.to_string());
     
     {
-        let mut child = child_arc.lock().unwrap_or_else(|p| p.into_inner());
-        child.write(req_str.as_bytes()).map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
+        let mut guard = child_arc.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(ref mut child) = *guard {
+            child.write(req_str.as_bytes()).map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?;
+        } else {
+            return Err(crate::errors::SentinelError::Sidecar("Process has been terminated".to_string()));
+        }
     }
     
     let response = tokio::time::timeout(std::time::Duration::from_secs(60), rx)

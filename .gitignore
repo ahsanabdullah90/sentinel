@@ -35,5 +35,8 @@ test_grpc_client.py
 *.db
 .pytest_cache/
 
+# Tauri sidecar binaries
+src-tauri/binaries/
+
 
 

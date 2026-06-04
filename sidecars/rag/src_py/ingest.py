@@ -10,7 +10,7 @@ Progress events are emitted as JSON lines on stdout.
 import os
 import json
 import logging
-from .chroma_client import ChromaClient
+from sidecars.rag.src_py.chroma_client import ChromaClient
 
 logger = logging.getLogger("rag.ingest")
 
