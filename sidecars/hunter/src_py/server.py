@@ -10,6 +10,18 @@ import sys
 import json
 import traceback
 import threading
+from pathlib import Path
+
+# If running as a PyInstaller bundle, point Playwright to the user's global browser cache
+# directory instead of searching inside the unpacked temp directory (/tmp/_MEIxxx).
+if getattr(sys, 'frozen', False):
+    home = Path.home()
+    if sys.platform == "win32":
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(home / "AppData" / "Local" / "ms-playwright")
+    elif sys.platform == "darwin":
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(home / "Library" / "Caches" / "ms-playwright")
+    else:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(home / ".cache" / "ms-playwright")
 
 from sidecars.hunter.src_py.portal_analyzer import analyze_portal
 from sidecars.hunter.src_py.portal_runner import PortalRunner

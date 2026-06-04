@@ -76,6 +76,13 @@ for name in "${!SIDECARS[@]}"; do
     
     info "Compiling sidecar '${name}' using PyInstaller..."
     
+    add_data_args=()
+    if [ "$name" = "hunter" ]; then
+        PLAYWRIGHT_PATH=$(python -c "import playwright; import os; print(os.path.dirname(playwright.__file__))")
+        info "Found Playwright at: $PLAYWRIGHT_PATH. Bundling driver..."
+        add_data_args+=("--add-data" "${PLAYWRIGHT_PATH}/driver:playwright/driver")
+    fi
+
     # We set PYTHONPATH to workspace root and pass '--paths .' to PyInstaller
     # so absolute imports like 'from sidecars.hunter...' or 'from sidecars.rag...' work flawlessly.
     PYTHONPATH=. pyinstaller --clean --onefile \
@@ -84,6 +91,7 @@ for name in "${!SIDECARS[@]}"; do
         --name "$binary_name" \
         --workpath "$PYINSTALLER_TEMP/${name}-build" \
         --specpath "$PYINSTALLER_TEMP/${name}-spec" \
+        "${add_data_args[@]}" \
         "$entry"
         
     if [ -f "$BINARIES_DIR/$binary_name" ]; then

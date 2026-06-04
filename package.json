@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node ./scripts/create_dummy_sidecars.js && tsc && vite build",
     "preview": "vite preview",
     "tauri": "npx tauri",
     "hunter:install": "cd sidecars/hunter && pip install -e . && playwright install",
