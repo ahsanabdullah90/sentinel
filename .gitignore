@@ -38,5 +38,6 @@ test_grpc_client.py
 # Tauri sidecar binaries
 src-tauri/binaries/
 
-
-
+# Python Egg Info
+*.egg-info/
+*.egg-info

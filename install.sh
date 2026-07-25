@@ -78,9 +78,9 @@ fi
 
 title "[4/5] Installing Application Dependencies"
 
-info "Provisioning Python Virtual Environment (.venv)..."
+info "Provisioning Python Virtual Environment (.venv) with Python 3.11..."
 if [ ! -d ".venv" ]; then
-    virtualenv .venv || python3 -m venv .venv
+    python3.11 -m venv .venv || py -3.11 -m venv .venv || virtualenv -p python3.11 .venv || python3 -m venv .venv
     success "Python virtual environment created."
 else
     info "Python virtual environment already exists."

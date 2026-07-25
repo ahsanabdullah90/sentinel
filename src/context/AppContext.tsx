@@ -71,11 +71,21 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [editingPortal, setEditingPortal] = useState<Portal | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [lastAutoHuntTimestamp, setLastAutoHuntTimestamp] = useState<string | null>(null);
-  const [settings, setSettings] = useState(() => {
+
+  interface AppSettings {
+    ollamaModel: string;
+    ollamaUrl: string;
+  }
+
+  const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('sentinel_settings');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved) as AppSettings;
+        return {
+          ollamaModel: typeof parsed.ollamaModel === 'string' ? parsed.ollamaModel : '',
+          ollamaUrl: typeof parsed.ollamaUrl === 'string' ? parsed.ollamaUrl : 'http://127.0.0.1:11434',
+        };
       }
     } catch (e) {
       console.error('Failed to parse settings from localStorage:', e);
@@ -320,15 +330,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     try {
       const status = await invoke('check_ollama_status', { url: settings.ollamaUrl });
       setOllamaStatus(status as string);
-      if (status === 'Online') {
-        const modelList = await invoke<string[]>('get_ollama_models', { url: settings.ollamaUrl });
-        if (modelList.length > 0) {
-          setSettings((prev: { ollamaModel: string; ollamaUrl: string }) => ({
-            ...prev,
-            ollamaModel: modelList.includes(prev.ollamaModel) ? prev.ollamaModel : modelList[0],
-          }));
-        }
-      }
     } catch (error) {
       console.error('Failed to check Ollama:', error);
       setOllamaStatus('Offline');
@@ -346,54 +347,80 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // ---------- Tauri Event Listeners (Refactored to rely on backend auto-persistence) ----------
   useEffect(() => {
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
-    if (!isTauri) return;
+    let active = true;
+    const unlisteners: (() => void)[] = [];
 
-    const unlistenPortal = listen('sentinel://hunter/portal-detected', async () => {
-      // Backend automatically persisted this. Just trigger a reload.
-      void loadPortals();
-    });
+    const setupListeners = async () => {
+      const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
+      if (!isTauri) return;
 
-    const unlistenOpp = listen('sentinel://hunter/opportunity-found', async () => {
-      // Backend automatically persisted this. Just trigger a reload.
-      void loadOpportunities();
-      void loadPortals();
-    });
-
-    const unlistenOppUpdated = listen('sentinel://hunter/opportunity-updated', async () => {
-      void loadOpportunities();
-    });
-
-    const unlistenAttDownloaded = listen('sentinel://hunter/attachment-downloaded', async () => {
-      void loadOpportunities();
-    });
-
-    const unlistenProgress = listen('sentinel://hunter/progress', async (event: any) => {
-      const payload = event.payload;
-      if (payload.message) {
-        setHuntLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${payload.message}`]);
-        if (payload.message === 'Hunt completed successfully') {
-          await finishActiveHuntRef.current(payload.portalId);
-        }
+      interface ProgressPayload {
+        message?: string;
+        portalId: string;
       }
-    });
-
-    const unlistenError = listen('sentinel://hunter/error', async (event: any) => {
-      const payload = event.payload;
-      if (payload.message) {
-        setHuntLogs(prev => [...prev, `[ERROR] ${payload.message}`]);
+      interface ErrorPayload {
+        message?: string;
       }
-      void loadPortals();
-      void triggerNextQueuePortalRef.current();
-    });
+      interface TauriEvent<T> {
+        payload: T;
+      }
+
+      try {
+        const u1 = await listen('sentinel://hunter/portal-detected', () => {
+          if (active) void loadPortals();
+        });
+        unlisteners.push(u1);
+
+        const u2 = await listen('sentinel://hunter/opportunity-found', () => {
+          if (active) {
+            void loadOpportunities();
+            void loadPortals();
+          }
+        });
+        unlisteners.push(u2);
+
+        const u3 = await listen('sentinel://hunter/opportunity-updated', () => {
+          if (active) void loadOpportunities();
+        });
+        unlisteners.push(u3);
+
+        const u4 = await listen('sentinel://hunter/attachment-downloaded', () => {
+          if (active) void loadOpportunities();
+        });
+        unlisteners.push(u4);
+
+        const u5 = await listen('sentinel://hunter/progress', (event: TauriEvent<ProgressPayload>) => {
+          if (!active) return;
+          const payload = event.payload;
+          if (payload.message) {
+            setHuntLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${payload.message}`]);
+            if (payload.message === 'Hunt completed successfully') {
+              void finishActiveHuntRef.current(payload.portalId);
+            }
+          }
+        });
+        unlisteners.push(u5);
+
+        const u6 = await listen('sentinel://hunter/error', (event: TauriEvent<ErrorPayload>) => {
+          if (!active) return;
+          const payload = event.payload;
+          if (payload.message) {
+            setHuntLogs(prev => [...prev, `[ERROR] ${payload.message}`]);
+          }
+          void loadPortals();
+          void triggerNextQueuePortalRef.current();
+        });
+        unlisteners.push(u6);
+      } catch (err) {
+        console.error('Failed to register Tauri event listeners:', err);
+      }
+    };
+
+    void setupListeners();
 
     return () => {
-      unlistenPortal.then(f => f?.());
-      unlistenOpp.then(f => f?.());
-      unlistenOppUpdated.then(f => f?.());
-      unlistenAttDownloaded.then(f => f?.());
-      unlistenProgress.then(f => f?.());
-      unlistenError.then(f => f?.());
+      active = false;
+      unlisteners.forEach(unlisten => unlisten());
     };
   }, []);
 
@@ -441,12 +468,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     void checkAndTriggerAutoHunt();
     const interval = setInterval(checkAndTriggerAutoHunt, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portals, hunting, lastAutoHuntTimestamp]);
 
   // Trigger boot sequence
   useEffect(() => {
     void bootstrapEngines();
     void checkOllama();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const contextValue: AppContextProps = {

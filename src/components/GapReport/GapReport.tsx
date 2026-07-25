@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { AlertTriangle, CheckCircle, Search } from 'lucide-react';
+import { useAppContext } from '../../context/AppContext';
 
 interface Gap {
   area: string;
@@ -8,6 +9,7 @@ interface Gap {
 }
 
 export function GapReport() {
+  const { settings } = useAppContext();
   const [rfpId, setRfpId] = useState('');
   const [gaps, setGaps] = useState<Gap[]>([]);
   const [loading, setLoading] = useState(false);
@@ -19,7 +21,11 @@ export function GapReport() {
     setError(null);
     try {
       // Call mock command
-      const result = await invoke('analyze_gaps', { rfpId });
+      const result = await invoke('analyze_gaps', {
+        rfpId,
+        ollamaUrl: settings.ollamaUrl,
+        ollamaModel: settings.ollamaModel,
+      });
       setGaps(result as Gap[]);
     } catch (err: any) {
       console.error('Gap analysis failed:', err);

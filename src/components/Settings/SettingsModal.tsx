@@ -22,11 +22,6 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
     try {
       const modelList = await invoke<string[]>('get_ollama_models', { url });
       setModels(modelList);
-      if (modelList.length > 0) {
-        if (!modelList.includes(ollamaModel)) {
-          setOllamaModel(modelList[0]);
-        }
-      }
     } catch (err) {
       console.error('Error fetching Ollama models:', err);
       setModelError('Offline or unreachable');
@@ -107,65 +102,83 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
                 color: '#8b90a0',
               }}
             >
-              Ollama Model Name
+               Ollama Model Name
             </label>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <select
-                value={ollamaModel}
-                onChange={(e) => setOllamaModel(e.target.value)}
-                disabled={models.length === 0}
-                style={{
-                  flex: 1,
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid #ccc',
-                  backgroundColor: models.length === 0 ? '#f0f0f0' : '#ffffff',
-                  color: models.length === 0 ? '#888888' : '#000000',
-                  boxSizing: 'border-box',
-                  height: '38px',
-                  fontWeight: '500',
-                }}
-              >
-                {models.length > 0 ? (
-                  models.map((m) => (
-                    <option key={m} value={m} style={{ color: '#000000', backgroundColor: '#ffffff' }}>
-                      {m}
-                    </option>
-                  ))
-                ) : (
-                  <option value="" style={{ color: '#888888', backgroundColor: '#ffffff' }}>
-                    {loadingModels ? 'Fetching models...' : 'No models found (Ollama offline)'}
-                  </option>
-                )}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  void fetchModels(ollamaUrl);
-                }}
-                disabled={loadingModels}
-                style={{
-                  height: '38px',
-                  padding: '0 12px',
-                  borderRadius: '4px',
-                  border: '1px solid #333',
-                  backgroundColor: '#2a2a2a',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                title="Refresh Model List"
-              >
-                <RefreshCw
-                  size={14}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input
+                  value={ollamaModel}
+                  onChange={(e) => setOllamaModel(e.target.value)}
+                  placeholder="e.g. llama3.1:8b or custom-model"
                   style={{
-                    animation: loadingModels ? 'spin 1s linear infinite' : 'none',
+                    flex: 1,
+                    padding: '8px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                    height: '38px',
                   }}
                 />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void fetchModels(ollamaUrl);
+                  }}
+                  disabled={loadingModels}
+                  style={{
+                    height: '38px',
+                    padding: '0 12px',
+                    borderRadius: '4px',
+                    border: '1px solid #333',
+                    backgroundColor: '#2a2a2a',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  title="Refresh Model List"
+                >
+                  <RefreshCw
+                    size={14}
+                    style={{
+                      animation: loadingModels ? 'spin 1s linear infinite' : 'none',
+                    }}
+                  />
+                </button>
+              </div>
+              {models.length > 0 && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#8b90a0' }}>Or select pulled model:</span>
+                  <select
+                    value={models.includes(ollamaModel) ? ollamaModel : ''}
+                    onChange={(e) => {
+                      if (e.target.value) setOllamaModel(e.target.value);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '4px',
+                      borderRadius: '4px',
+                      border: '1px solid #333',
+                      backgroundColor: '#2a2a2a',
+                      color: '#fff',
+                      fontSize: '0.8rem',
+                      height: '30px',
+                    }}
+                  >
+                    <option value="">-- Choose dynamic model --</option>
+                    {models.map((m) => (
+                      <option key={m} value={m} style={{ color: '#ffffff', backgroundColor: '#2a2a2a' }}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
+
             {modelError && (
               <span
                 style={{

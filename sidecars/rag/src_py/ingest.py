@@ -10,6 +10,7 @@ Progress events are emitted as JSON lines on stdout.
 import os
 import json
 import logging
+import pypdf
 from sidecars.rag.src_py.chroma_client import ChromaClient
 
 logger = logging.getLogger("rag.ingest")
@@ -48,8 +49,27 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
         "message": f"Parsing {ext} file..."
     }), flush=True)
 
-    # 1. Text extraction (stub – replace with real parser)
-    extracted_text = f"This is mock extracted text for RFP {rfp_id} from {file_path}."
+    # 1. Real Text Extraction (pypdf)
+    extracted_text = ""
+    try:
+        with open(file_path, "rb") as f:
+            reader = pypdf.PdfReader(f)
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    extracted_text += text + "\n"
+    except Exception as e:
+        logger.error(f"Failed parsing PDF {file_path}: {e}")
+        extracted_text = ""
+
+    if not extracted_text.strip():
+        # Try as plain text file fallback
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                extracted_text = f.read()
+        except Exception as e:
+            logger.error(f"Failed to read file as text: {e}")
+            extracted_text = f"Unparseable file: {os.path.basename(file_path)}"
 
     print(json.dumps({
         "event": "progress",
@@ -57,8 +77,33 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
         "message": "Chunking text..."
     }), flush=True)
 
-    # 2. Chunking (stub – replace with real chunker)
-    chunks = [{"text": extracted_text, "id": f"{rfp_id}-chunk-0"}]
+    # 2. Recursive-Character Chunking
+    chunk_size = 1500
+    chunk_overlap = 150
+    chunks = []
+    
+    words = extracted_text.split()
+    current_chunk = []
+    current_len = 0
+    chunk_idx = 0
+    
+    for word in words:
+        current_chunk.append(word)
+        current_len += len(word) + 1
+        if current_len >= chunk_size:
+            chunks.append({
+                "text": " ".join(current_chunk),
+                "id": f"{rfp_id}-chunk-{chunk_idx}"
+            })
+            chunk_idx += 1
+            current_chunk = current_chunk[-30:] if len(current_chunk) > 30 else []
+            current_len = sum(len(w) + 1 for w in current_chunk)
+            
+    if current_chunk:
+        chunks.append({
+            "text": " ".join(current_chunk),
+            "id": f"{rfp_id}-chunk-{chunk_idx}"
+        })
 
     print(json.dumps({
         "event": "progress",

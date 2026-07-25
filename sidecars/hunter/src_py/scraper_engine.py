@@ -213,7 +213,70 @@ class StaticHtmlStrategy(ScrapingStrategy):
         await rate_limiter.acquire()
         await reporter.report_progress("Initiating static HTML analysis sequence...")
         
-        # Route to generic search strategy as the primary AI engine
+        try:
+            from bs4 import BeautifulSoup
+            
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            req = urllib.request.Request(config.base_url, headers=headers)
+            
+            # Run blocking I/O request in executor
+            def run_get():
+                try:
+                    with urllib.request.urlopen(req, timeout=15.0) as response:
+                        return response.read()
+                except Exception as ex:
+                    logger.debug(f"urllib static GET failed: {ex}")
+                    return b""
+            
+            html_bytes = await asyncio.get_running_loop().run_in_executor(None, run_get)
+            if not html_bytes:
+                await reporter.report_progress("Static HTML fetch returned empty. Falling back to dynamic Playwright strategy.")
+                generic_fallback = GenericSearchStrategy()
+                return await generic_fallback.execute(config, rate_limiter, reporter)
+
+            soup = BeautifulSoup(html_bytes, "html.parser")
+            
+            # Heuristic link opportunity search
+            opportunities = []
+            keywords = [k.strip().lower() for k in config.keywords.split(",") if k.strip()] if config.keywords else ["rfp", "proposal", "bid", "tender", "opportunity"]
+            
+            # Find all anchor tags
+            for link in soup.find_all("a", href=True):
+                href = link["href"]
+                text = link.get_text(strip=True)
+                
+                # Check if text or href matches any keyword
+                matches = False
+                for kw in keywords:
+                    if kw in text.lower() or kw in href.lower():
+                        matches = True
+                        break
+                
+                if matches and len(text) > 5:
+                    # Resolve relative URL
+                    from urllib.parse import urljoin
+                    full_url = urljoin(config.base_url, href)
+                    
+                    # Create opportunity
+                    opp = RFPOpportunity(
+                        id=f"static-{secrets.token_hex(4)}",
+                        portal_id=config.id,
+                        title=text[:150],
+                        url=full_url,
+                        status="discovered",
+                        description=f"Found via static HTML parsing of {config.base_url}"
+                    )
+                    opportunities.append(opp)
+                    await reporter.report_opportunity(opp)
+            
+            if opportunities:
+                await reporter.report_progress(f"Discovered {len(opportunities)} opportunities via fast static HTML scraper.")
+                return opportunities
+
+        except Exception as e:
+            logger.error(f"StaticHtmlStrategy execution failed: {e}")
+            
+        await reporter.report_progress("No opportunities found via static HTML. Triggering dynamic Playwright fallback...")
         generic_fallback = GenericSearchStrategy()
         return await generic_fallback.execute(config, rate_limiter, reporter)
 

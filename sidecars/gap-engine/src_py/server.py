@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import traceback
+from gap_engine import analyze_gaps
 
 # ---------------------------------------------------------------------------
 # IPC Hijack & Safety Redirection
@@ -39,9 +40,14 @@ logger.propagate = False
 # Handlers
 # ---------------------------------------------------------------------------
 
+import re
+
 async def handle_analyze_gaps(params: dict, req_id: str):
     rfp_id = params.get("rfp_id")
-    if not rfp_id or any(char in rfp_id for char in ["/", "\\", "..", "*", "?", " "]):
+    ollama_url = params.get("ollama_url") or os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    ollama_model = params.get("ollama_model") or os.getenv("OLLAMA_MODEL", "llama3")
+
+    if not rfp_id or not re.match(r"^[a-zA-Z0-9_-]+$", rfp_id):
         logger.error(f"Malicious or invalid rfp_id received: '{rfp_id}'")
         _emit_ipc({
             "error": {"message": "Invalid rfp_id format"},
@@ -52,12 +58,8 @@ async def handle_analyze_gaps(params: dict, req_id: str):
     logger.info(f"JSON-RPC AnalyzeGaps request received for RFP ID: {rfp_id}")
 
     try:
-        # Static mock gap stubs for now
-        gaps = [
-            {"area": "Security", "description": "Missing details on data encryption at rest."},
-            {"area": "Compliance", "description": "FedRAMP level not specified."}
-        ]
-        
+        loop = asyncio.get_running_loop()
+        gaps = await loop.run_in_executor(None, lambda: analyze_gaps(rfp_id, ollama_url, ollama_model))
         _emit_ipc({
             "result": {
                 "rfp_id": rfp_id,

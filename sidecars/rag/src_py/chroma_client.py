@@ -28,7 +28,7 @@ class ChromaClient:
                 self.client.heartbeat()
                 return True
             except Exception as e:
-                logger.debug(f"Heartbeat check failed: {e}")
+                logger.error(f"Heartbeat check failed: {e}")
                 return False
 
         return await asyncio.get_running_loop().run_in_executor(None, run_heartbeat)
@@ -40,7 +40,7 @@ class ChromaClient:
                 return [{"name": c.name} for c in self.client.list_collections()]
             except Exception as e:
                 logger.error(f"Chroma list_collections failed: {str(e)}")
-                return []
+                raise RuntimeError(f"Failed to list ChromaDB collections: {str(e)}")
 
         return await asyncio.get_running_loop().run_in_executor(None, run_list)
 
@@ -64,7 +64,7 @@ class ChromaClient:
                     return True
                 except Exception as e:
                     logger.error(f"Chroma upsert failed: {str(e)}")
-                    raise
+                    raise RuntimeError(f"Chroma upsert execution failed: {str(e)}")
 
             await asyncio.get_running_loop().run_in_executor(None, run_upsert)
 
@@ -80,7 +80,7 @@ class ChromaClient:
                     return results
                 except Exception as e:
                     logger.error(f"Chroma query failed: {str(e)}")
-                    raise
+                    raise RuntimeError(f"Chroma query execution failed: {str(e)}")
 
             return await asyncio.get_running_loop().run_in_executor(None, run_query)
 

@@ -123,14 +123,22 @@ async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn analyze_gaps(app: tauri::AppHandle, rfp_id: String) -> Result<Vec<serde_json::Value>, String> {
-    // C-4: Validate/sanitize rfp_id via uuid::Uuid prior to executing commands in Tauri backend
+async fn analyze_gaps(
+    app: tauri::AppHandle,
+    rfp_id: String,
+    ollama_url: String,
+    ollama_model: String,
+) -> Result<Vec<serde_json::Value>, String> {
     if uuid::Uuid::parse_str(&rfp_id).is_err() {
         return Err("Invalid rfp_id format. Must be a valid UUID.".to_string());
     }
 
     let req_id = uuid::Uuid::new_v4().to_string();
-    let params = serde_json::json!({ "rfp_id": rfp_id });
+    let params = serde_json::json!({
+        "rfp_id": rfp_id,
+        "ollama_url": ollama_url,
+        "ollama_model": ollama_model,
+    });
     
     let response = crate::sidecar::execute_jsonrpc_method_await(
         app,
@@ -166,8 +174,11 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
         let _ = conn.execute("DELETE FROM opportunities WHERE id IN ('101', '102')", []);
         let _ = conn.execute("DELETE FROM opportunities WHERE title LIKE 'Found result for %'", []);
         let _ = conn.execute("DELETE FROM portals WHERE id = '1'", []);
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO portals (id, name, base_url, auth_method, scraper_module) VALUES ('other', 'Other / Manual', 'http://localhost', 'public', 'manual')",
+            []
+        );
 
-        let mut presets_to_update = Vec::new();
         if let Ok(mut stmt) = conn.prepare("SELECT id, base_url, selector_config FROM portals") {
             if let Ok(mut rows) = stmt.query([]) {
                 while let Ok(Some(row)) = rows.next() {
@@ -314,6 +325,7 @@ pub fn run() {
             commands::db_commands::get_knowledge_base,
             commands::db_commands::save_knowledge_item,
             commands::db_commands::delete_knowledge_item,
+            commands::db_commands::create_opportunity,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

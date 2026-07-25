@@ -264,7 +264,7 @@ useEffect(() => {
             Proposal Drafting Context System
           </h4>
           <p style={{ margin: 0, fontSize: '0.85rem', color: '#8b90a0', lineHeight: '1.4' }}>
-            Feed Sentinel your company's core competencies, personnel bios, technical capabilities,
+            Feed Sentinel your company&apos;s core competencies, personnel bios, technical capabilities,
             case studies, and past performance reviews. When generating proposal drafts for new
             opportunities, select which items to attach to the AI context to craft highly customized
             and factual bids.

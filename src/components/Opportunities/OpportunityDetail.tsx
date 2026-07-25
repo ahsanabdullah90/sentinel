@@ -860,8 +860,8 @@ End of Auto-Generated Proposal Draft.`;
                 </h4>
                 <p style={{ margin: 0, fontSize: '0.82rem', color: '#8b90a0', lineHeight: '1.4' }}>
                   Sentinel is ready to execute a full fit & risk compatibility assessment. Choose
-                  reference context items from the right sidebar, then click **"Run Fit &
-                  Compatibility Analysis"** to generate the 1-10 match score.
+                  reference context items from the right sidebar, then click **&quot;Run Fit &amp;
+                  Compatibility Analysis&quot;** to generate the 1-10 match score.
                 </p>
               </div>
             </div>

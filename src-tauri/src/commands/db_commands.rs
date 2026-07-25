@@ -160,3 +160,55 @@ pub async fn save_knowledge_item(
 pub async fn delete_knowledge_item(app: AppHandle, id: String) -> Result<(), SentinelError> {
     crate::db::queries::delete_knowledge_item(&app, id)
 }
+
+#[tauri::command]
+pub async fn create_opportunity(
+    app: AppHandle,
+    portal_id: String,
+    title: String,
+    issuing_org: String,
+    deadline_at: String,
+    url: String,
+    description: String,
+) -> Result<bool, SentinelError> {
+    let portal_id_clean = portal_id.trim().to_string();
+    let title_clean = title.trim().to_string();
+    let url_clean = url.trim().to_string();
+    let issuing_org_clean = issuing_org.trim().to_string();
+    let deadline_at_clean = deadline_at.trim().to_string();
+    let description_clean = description.trim().to_string();
+
+    if title_clean.is_empty() {
+        return Err(SentinelError::Database("Opportunity title cannot be empty".to_string()));
+    }
+    if portal_id_clean.is_empty() {
+        return Err(SentinelError::Database("Source portal must be specified".to_string()));
+    }
+    if title_clean.contains('<') || title_clean.contains('>') {
+        return Err(SentinelError::Database("Invalid HTML tags in opportunity title".to_string()));
+    }
+    if url_clean.contains('<') || url_clean.contains('>') {
+        return Err(SentinelError::Database("Invalid HTML tags in opportunity URL".to_string()));
+    }
+
+    // Loop-check to validate UUID uniqueness and prevent collisions (Audit line 170 fix)
+    let mut id = uuid::Uuid::new_v4().to_string();
+    for _ in 0..5 {
+        if crate::db::queries::get_opportunity_detail(&app, id.clone())?.is_some() {
+            id = uuid::Uuid::new_v4().to_string();
+        } else {
+            break;
+        }
+    }
+
+    crate::db::queries::record_opportunity(
+        &app, 
+        id, 
+        portal_id_clean, 
+        title_clean, 
+        issuing_org_clean, 
+        deadline_at_clean, 
+        url_clean, 
+        description_clean
+    )
+}

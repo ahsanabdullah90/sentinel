@@ -33,6 +33,7 @@ package-lock.json
 package.json
 public/tauri.svg
 public/vite.svg
+run.bat
 scripts/check-all.sh
 scripts/pre-check.sh
 scripts/security-audit.sh
