@@ -76,7 +76,7 @@ async def handle_detect(params: dict, req_id: str):
         })
     except Exception as e:
         logger.error(f"Error in analyze_portal: {str(e)}")
-        _emit_ipc({
+        await _emit_ipc({
             "event": "error",
             "json_payload": json.dumps({"message": str(e)}),
             "payload_type": 0,
@@ -120,13 +120,13 @@ async def handle_hunt(params: dict, req_id: str):
         config = PortalConfig.model_validate(raw_config)
     except Exception as ve:
         logger.error(f"Config validation error: {str(ve)}")
-        _emit_ipc({
+        await _emit_ipc({
             "event": "error",
             "json_payload": json.dumps({"message": f"Configuration validation failed: {str(ve)}"}),
             "payload_type": 0,
             "req_id": req_id
         })
-        _emit_ipc({"event": "hunt_complete", "req_id": req_id})
+        await _emit_ipc({"event": "hunt_complete", "req_id": req_id})
         return
 
     async def on_event(event_name: str, payload: dict):

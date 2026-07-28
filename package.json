@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "setup": "npm ci && npm run sidecars:install",
     "dev": "vite",
     "build": "node ./scripts/create_dummy_sidecars.js && tsc && vite build",
     "preview": "vite preview",

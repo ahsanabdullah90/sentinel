@@ -7,8 +7,8 @@ npm ci
 echo "=== Installing hunter side-car ==="
 npm run hunter:install
 
-echo "=== Installing RAG side-car dependencies ==="
-cd sidecars/rag && npm install && cd ../..
+echo "=== Installing Python sidecars dependencies ==="
+npm run sidecars:install
 
 echo "=== Installing system libraries (Debian/Ubuntu) ==="
 sudo apt-get update && sudo apt-get install -y libsqlite3-dev

@@ -68,8 +68,14 @@ def init_db():
             UPDATE jobs SET status = 'pending', updated_at = CURRENT_TIMESTAMP
             WHERE status = 'processing'
         """)
+        # Automatic retention pruning: delete completed/failed jobs older than 7 days
+        cur.execute("""
+            DELETE FROM jobs
+            WHERE status IN ('completed', 'failed')
+            AND updated_at < datetime('now', '-7 days')
+        """)
         conn.commit()
-        logger.info(f"Initialized SQLite job queue at {DB_PATH}")
+        logger.info(f"Initialized SQLite job queue and pruned stale records at {DB_PATH}")
     except Exception as e:
         logger.error(f"Failed to initialize SQLite job queue: {e}")
         if conn:

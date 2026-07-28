@@ -35,6 +35,8 @@ public/tauri.svg
 public/vite.svg
 run.bat
 scripts/check-all.sh
+scripts/compile_sidecars.sh
+scripts/create_dummy_sidecars.js
 scripts/pre-check.sh
 scripts/security-audit.sh
 setup.sh

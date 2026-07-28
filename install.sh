@@ -107,10 +107,6 @@ npm ci --silent
 info "Installing Playwright scraper and Chromium browser dependencies..."
 npm run hunter:install --silent
 
-info "Installing RAG sidecar dependencies..."
-cd sidecars/rag
-npm install --silent
-cd ../..
 
 success "All JavaScript and Playwright sidecar dependencies are successfully provisioned."
 

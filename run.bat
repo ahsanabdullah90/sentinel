@@ -1,8 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Add Rust cargo binary path if present
+if exist "%USERPROFILE%\.cargo\bin" set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+
 echo ===================================================
-echo   Sentinel RFP Agent – Launch & Lifecycle Manager
+echo   Sentinel RFP Agent - Launch and Lifecycle Manager
 echo ===================================================
 
 :: 1. Ensure .env exists
@@ -45,7 +48,7 @@ call npm run tauri dev
 
 :: 4. Post-run Cleanup: Terminate orphaned child processes
 echo ===================================================
-echo   Sentinel – Initiating Graceful Process Cleanup...
+echo   Sentinel - Initiating Graceful Process Cleanup...
 echo ===================================================
 
 :: Kill orphaned Tauri / Rust binaries

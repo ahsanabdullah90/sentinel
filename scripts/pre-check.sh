@@ -35,14 +35,18 @@ else
 fi
 
 echo ""
-echo "--- 2. Ports ---"
-for port in 11434 8000 1420; do
-    if ! ss -tuln | grep -q ":$port "; then
-        pass "Port $port is free"
-    else
-        fail "Port $port is in use. Please free this port."
-    fi
-done
+echo "--- 2. Network & Ports ---"
+if ss -tuln 2>/dev/null | grep -q ":11434 "; then
+    pass "Ollama service detected running on port 11434"
+else
+    warn "Ollama service not running on port 11434 (will be auto-started by launcher)"
+fi
+
+if ! ss -tuln 2>/dev/null | grep -q ":1420 "; then
+    pass "Tauri dev server port 1420 is available"
+else
+    fail "Port 1420 is in use. Please free port 1420 for Vite dev server."
+fi
 
 echo ""
 echo "--- 3. Disk Space ---"
