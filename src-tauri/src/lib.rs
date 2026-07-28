@@ -179,6 +179,8 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
             []
         );
 
+        let mut presets_to_update: Vec<String> = Vec::new();
+
         if let Ok(mut stmt) = conn.prepare("SELECT id, base_url, selector_config FROM portals") {
             if let Ok(mut rows) = stmt.query([]) {
                 while let Ok(Some(row)) = rows.next() {

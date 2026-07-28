@@ -14,12 +14,47 @@ Sentinel uses a multi-service architecture entirely embedded locally for maximum
 
 Services communicate via high-performance **JSON-RPC over standard input/output streams** directly managed by the Tauri host.
 
-## 📦 Installation & Setup
+---
+
+## 📦 Quick Start (Windows)
+
+### Prerequisites
+
+| Component | Version | Install |
+|---|---|---|
+| Node.js | >= 20 | https://nodejs.org |
+| Python | >= 3.11 | https://python.org |
+| Rust | stable | https://rustup.rs |
+| MSVC Build Tools | 2022+ | `winget install Microsoft.VisualStudio.2022.BuildTools` |
+| Ollama | latest | https://ollama.com |
+
+### One-Command Setup
+
+```bat
+setup.bat
+```
+
+This installs all Node.js, Python, and Playwright dependencies.
+
+### Run the App
+
+```bat
+run.bat
+```
+
+The launcher automatically:
+- Starts Ollama if not running
+- Verifies all dependencies
+- Launches the Tauri development server
+
+---
+
+## 📦 Installation & Setup (Linux)
 
 1. **Prerequisites**
    - **Node >=20**
    - **Rust toolchain** (stable)
-   - **System Libraries** (Linux):
+   - **System Libraries**:
      ```bash
      sudo apt-get update
      sudo apt-get install -y libsqlite3-dev protobuf-compiler \
@@ -42,43 +77,55 @@ Services communicate via high-performance **JSON-RPC over standard input/output 
    npm run tauri dev
    ```
 
-4. **Testing**
-   ```bash
-   npm run test:all           # run all unit tests
-   ```
+---
 
-## 📂 Project Layout
+## 🧪 Testing
 
-Here is an overview of the key directories and configuration files in this repository:
+```bash
+# Run all sidecar tests (run from each sidecar directory)
+cd sidecars/hunter && pytest tests/ -v
+cd sidecars/rag && pytest tests/ -v
+cd sidecars/worker && pytest tests/ -v
+cd sidecars/gap_engine && pytest tests/ -v
 
-### Directories
-* **`__tests__`**: Vitest frontend unit tests.
-* **`config`**: Application configuration files (e.g., SQLite paths, defaults).
-* **`docs`**: Technical architecture and module documentation.
-* **`public`**: Static assets for the frontend (icons, SVGs).
-* **`scripts`**: Developer helper scripts (e.g., dummy sidecar generators, pre-checks).
-* **`sidecars`**: Embedded Python sidecars (Hunter scraper, RAG engine, Gap Engine, and Worker queue).
-* **`src`**: React + TypeScript frontend codebase.
-* **`src-tauri`**: Rust Tauri application core configuration and desktop backend code.
-* **`tests`**: Python-based integration tests for sidecar services.
-
-### Core Configuration Files
-* **`.env.example`**: Template for environment variable configurations.
-* **`.eslintignore` / `.eslintrc.json`**: ESLint configuration and rules.
-* **`.gitignore`**: Files and directories ignored by Git.
-* **`.prettierignore` / `.prettierrc.json`**: Prettier formatting configuration and rules.
-* **`CHANGELOG.md`**: Log of updates and releases.
-* **`index.html`**: Entry page for the React app.
-* **`install.sh`**: Setup shell script for compiling native dependencies on Unix platforms.
-* **`run.bat`**: Lifecycle manager to start dependencies (like Ollama) and launch the app on Windows.
-* **`setup.sh`**: Initial developer environment bootstrapping script.
-* **`tsconfig.json` / `tsconfig.node.json`**: TypeScript compiler configurations.
-* **`vite.config.ts` / `vitest.config.ts`**: Vite bundle manager and Vitest framework settings.
-
-## 📚 Documentation
-
-- See `DESIGN.md` for architectural details.
+# Or run root-level tests
+pytest tests/ -v
+```
 
 ---
 
-_All commands are defined in `package.json` scripts._
+## 📂 Project Layout
+
+### Directories
+
+| Directory | Description |
+|---|---|
+| `sidecars/hunter` | Playwright web scraper for discovering RFPs |
+| `sidecars/rag` | Retrieval-Augmented Generation (ChromaDB + Ollama) |
+| `sidecars/worker` | Background job processor (SQLite queue) |
+| `sidecars/gap_engine` | Compliance gap analysis (Ollama inference) |
+| `src` | React + TypeScript frontend codebase |
+| `src-tauri` | Rust Tauri application core |
+| `tests` | Python integration tests |
+| `docs` | Architecture and module documentation |
+
+### Key Files
+
+| File | Description |
+|---|---|
+| `setup.bat` | Windows one-command setup |
+| `run.bat` | Windows app launcher with pre-flight checks |
+| `install.sh` | Linux/Unix setup script |
+| `.env.example` | Environment variable template |
+
+---
+
+## 📚 Documentation
+
+- `DESIGN.md` — Architecture and design system
+- `docs/architecture.md` — Component diagram and module details
+- `sidecars/*/README.md` — Per-sidecar documentation
+
+---
+
+_See `package.json` for all available npm scripts._
