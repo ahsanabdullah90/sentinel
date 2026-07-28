@@ -21,7 +21,7 @@ def generate_gaps(
     rfp_id: str,
     context_text: str,
     ollama_url: str = "http://127.0.0.1:11434",
-    model_name: str = "llama3",
+    model_name: str = "gemma3:4b",
 ) -> List[Dict[str, str]]:
     """Analyze RFP context for compliance gaps using Ollama.
 
@@ -48,7 +48,7 @@ def generate_gaps(
     prompt = _build_prompt(context_text)
 
     payload = {
-        "model": model_name or "llama3",
+        "model": model_name or "gemma3:4b",
         "prompt": prompt,
         "stream": False,
         "options": {"temperature": 0.1},

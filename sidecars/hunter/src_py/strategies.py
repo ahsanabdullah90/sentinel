@@ -409,8 +409,10 @@ class GenericSearchStrategy(ScrapingStrategy):
                                                     ollama_url,
                                                 )
                                                 preferred = [
+                                                    "gemma3",
                                                     "gemma4",
                                                     "gemma",
+                                                    "qwen3",
                                                     "qwen2.5-coder",
                                                     "llama3",
                                                 ]
@@ -635,7 +637,7 @@ class GenericSearchStrategy(ScrapingStrategy):
             target_model = os.environ.get("OLLAMA_MODEL")
 
         if not target_model or target_model not in available_models:
-            preferred = ["gemma4", "gemma", "qwen2.5-coder", "llama3"]
+            preferred = ["gemma3", "gemma4", "gemma", "qwen3", "qwen2.5-coder", "llama3"]
             for pref in preferred:
                 match = next(
                     (m for m in available_models if pref in m.lower()), None

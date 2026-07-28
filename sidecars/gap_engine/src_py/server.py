@@ -58,7 +58,7 @@ async def handle_analyze_gaps(params: dict, req_id: str):
         "OLLAMA_URL", "http://127.0.0.1:11434"
     )
     ollama_model = params.get("ollama_model") or os.getenv(
-        "OLLAMA_MODEL", "llama3"
+        "OLLAMA_MODEL", "gemma3:4b"
     )
 
     if not rfp_id or not re.match(r"^[a-zA-Z0-9_-]+$", rfp_id):

@@ -17,7 +17,7 @@ logger = logging.getLogger("gap_engine.analyzer")
 def analyze_gaps(
     rfp_id: str,
     ollama_url: str = "http://127.0.0.1:11434",
-    model_name: str = "llama3",
+    model_name: str = "gemma3:4b",
     db_path: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     """Analyze compliance and requirements gaps for a given RFP.

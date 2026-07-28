@@ -204,13 +204,13 @@ def _pick_best_model(pulled_models: list) -> str:
     Falls back to the first available model if no preferred model is found.
     """
     preferred_candidates = [
-        "qwen2.5-coder",
+        "gemma3",
+        "qwen3",
         "gemma",
         "deepseek",
         "phi3",
-        "llama3.1:8b",
-        "llama3",
         "mistral",
+        "llama3",
     ]
     for pref in preferred_candidates:
         matched = [
@@ -218,7 +218,7 @@ def _pick_best_model(pulled_models: list) -> str:
         ]
         if matched:
             return matched[0]
-    return pulled_models[0] if pulled_models else "llama3.1:8b"
+    return pulled_models[0] if pulled_models else "gemma3:4b"
 
 
 # ---------------------------------------------------------------------------
