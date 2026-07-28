@@ -12,7 +12,7 @@
     "ecmaFeatures": {
       "jsx": true
     },
-    "project": ["./tsconfig.json", "./tsconfig.node.json", "./sidecars/*/tsconfig.json"]
+    "project": ["./tsconfig.json", "./tsconfig.node.json"]
   },
   "extends": [
     "eslint:recommended",

@@ -10,7 +10,7 @@ import logging
 import urllib.request
 from playwright.async_api import async_playwright
 
-from sidecars.hunter.src_py.scraper_engine import extract_json
+from sidecars.hunter.src_py.ollama_utils import extract_json
 from sidecars.hunter.src_py.utils.search_detector import detect_search_input
 
 logger = logging.getLogger("hunter.portal_analyzer")

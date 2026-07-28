@@ -8,12 +8,12 @@ The client reads ``OLLAMA_URL`` from the environment (default
 """
 
 import asyncio
-import os
 import json
 import logging
 import urllib.request
-import urllib.error
-from urllib.parse import urlparse
+from typing import List
+
+from sidecars.rag.src_py.utils import resolve_ollama_url
 
 logger = logging.getLogger("rag.ollama_client")
 
@@ -22,18 +22,7 @@ class OllamaClient:
     """Lightweight async Ollama client using ``urllib``."""
 
     def __init__(self):
-        base_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-        
-        # Smart Loopback translation if running in Docker
-        if os.environ.get("RUNNING_IN_DOCKER") == "true":
-            parsed_ollama = urlparse(base_url)
-            if parsed_ollama.hostname in ("localhost", "127.0.0.1"):
-                netloc = "host.docker.internal"
-                if parsed_ollama.port:
-                    netloc = f"host.docker.internal:{parsed_ollama.port}"
-                base_url = parsed_ollama._replace(netloc=netloc).geturl()
-
-        self.base_url = base_url
+        self.base_url = resolve_ollama_url()
         logger.info(f"Initialized OllamaClient pointing to: {self.base_url}")
 
     async def check_health(self) -> bool:
@@ -50,24 +39,12 @@ class OllamaClient:
 
     async def is_model_pulled(self, model_name: str) -> bool:
         """Check whether *model_name* is available locally in Ollama."""
-        def run_tags():
-            try:
-                url = f"{self.base_url}/api/tags"
-                with urllib.request.urlopen(url, timeout=2.0) as response:
-                    if response.status == 200:
-                        data = json.loads(response.read().decode("utf-8"))
-                        models = data.get("models", [])
-                        return any(
-                            m.get("name") == model_name or m.get("name") == f"{model_name}:latest"
-                            for m in models
-                        )
-            except Exception:
-                return False
-            return False
+        pulled = await self.get_pulled_models()
+        return any(
+            m == model_name or m == f"{model_name}:latest" for m in pulled
+        )
 
-        return await asyncio.get_running_loop().run_in_executor(None, run_tags)
-
-    async def get_pulled_models(self) -> list:
+    async def get_pulled_models(self) -> List[str]:
         """Get list of all pulled model names in local Ollama."""
         def run_tags():
             try:
@@ -75,15 +52,20 @@ class OllamaClient:
                 with urllib.request.urlopen(url, timeout=2.0) as response:
                     if response.status == 200:
                         data = json.loads(response.read().decode("utf-8"))
-                        return [m.get("name") for m in data.get("models", []) if m.get("name")]
+                        return [
+                            m.get("name")
+                            for m in data.get("models", [])
+                            if m.get("name")
+                        ]
             except Exception:
-                return []
+                pass
             return []
 
         return await asyncio.get_running_loop().run_in_executor(None, run_tags)
 
-
-    async def generate(self, model: str, prompt: str, system_context: str = None) -> str:
+    async def generate(
+        self, model: str, prompt: str, system_context: str = None
+    ) -> str:
         """Generate a text completion using *model*.
 
         Args:
@@ -102,7 +84,7 @@ class OllamaClient:
             payload = {
                 "model": model,
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
             }
             if system_context:
                 payload["system"] = system_context
@@ -112,17 +94,20 @@ class OllamaClient:
                 url,
                 data=json.dumps(payload).encode("utf-8"),
                 headers=headers,
-                method="POST"
+                method="POST",
             )
             try:
                 with urllib.request.urlopen(req, timeout=30.0) as response:
                     if response.status == 200:
                         data = json.loads(response.read().decode("utf-8"))
                         return data.get("response", "")
-                    else:
-                        raise RuntimeError(f"Ollama generation failed: {response.reason}")
+                    raise RuntimeError(
+                        f"Ollama generation failed: {response.reason}"
+                    )
             except Exception as e:
                 logger.error(f"Ollama generate failed: {str(e)}")
                 raise RuntimeError(f"Ollama generation failed: {str(e)}")
 
-        return await asyncio.get_running_loop().run_in_executor(None, run_generate)
+        return await asyncio.get_running_loop().run_in_executor(
+            None, run_generate
+        )

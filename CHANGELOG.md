@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Python Sidecars**: Refactored `gap-engine`, `hunter`, and `rag` sidecars with enhanced scraping strategies, updated dependency requirements, and Chroma client error handling.
+- **Python Sidecars**: Refactored `gap_engine`, `hunter`, and `rag` sidecars with enhanced scraping strategies, updated dependency requirements, and Chroma client error handling.
 - **Tauri Integration**: Expanded Tauri database commands and main library bindings (`src-tauri/src/commands/db_commands.rs`, `src-tauri/src/lib.rs`).
 - **UI Components**: Updated GapReport, KnowledgeBaseDashboard, OpportunitiesModal, OpportunityDetail, and SettingsModal UI components.
 
@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ollama_client.py` – Async HTTP wrapper for Ollama generation API.
   - `ingest.py` – Document ingestion pipeline (text extraction, chunking, embedding storage).
   - `server.py` – gRPC server hosting `Ingest` and `Query` RPCs.
-- **Gap Engine** (`sidecars/gap-engine/src_py/`):
+- **Gap Engine** (`sidecars/gap_engine/src_py/`):
   - `gap_engine.py` – RFP gap analysis with structured JSON output.
 - **Worker Sidecar** (`sidecars/worker/src_py/`):
   - `worker.py` – Redis-backed background job processor with concrete data transformation:

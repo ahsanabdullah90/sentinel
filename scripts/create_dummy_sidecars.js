@@ -20,7 +20,7 @@ if (!fs.existsSync(binariesDir)) {
   fs.mkdirSync(binariesDir, { recursive: true });
 }
 
-const sidecars = ['hunter', 'rag', 'gap-engine', 'worker'];
+const sidecars = ['hunter', 'rag', 'gap_engine', 'worker'];
 const isWindows = process.platform === 'win32' || triple.includes('windows');
 
 sidecars.forEach((name) => {

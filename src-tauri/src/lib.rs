@@ -142,7 +142,7 @@ async fn analyze_gaps(
     
     let response = crate::sidecar::execute_jsonrpc_method_await(
         app,
-        "gap-engine",
+        "gap_engine",
         "analyze_gaps",
         params,
         &req_id,

@@ -1,0 +1,2 @@
+# Gap Engine uses Python stdlib only (no external dependencies).
+# Dependencies are managed via pyproject.toml.

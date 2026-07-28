@@ -4,14 +4,16 @@ Handles document ingestion for the RAG sidecar.  Reads a file from disk,
 extracts text, splits it into chunks, and stores the chunks in ChromaDB
 via ``ChromaClient``.
 
-Progress events are emitted as JSON lines on stdout.
+Progress events are emitted via the events module for IPC.
 """
 
 import os
-import json
 import logging
 import pypdf
+from typing import List, Dict
+
 from sidecars.rag.src_py.chroma_client import ChromaClient
+from sidecars.rag.src_py.events import emit_progress, emit_warning
 
 logger = logging.getLogger("rag.ingest")
 
@@ -31,25 +33,68 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
         FileNotFoundError: If *file_path* does not exist.
         RuntimeError: If ChromaDB storage fails.
     """
-    print(json.dumps({
-        "event": "progress",
-        "portalId": "rag",
-        "message": f"Starting ingestion for {file_path} (Python)"
-    }), flush=True)
+    emit_progress(f"Starting ingestion for {file_path}")
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
     _, ext = os.path.splitext(file_path)
-    ext = ext.lower()
 
-    print(json.dumps({
-        "event": "progress",
-        "portalId": "rag",
-        "message": f"Parsing {ext} file..."
-    }), flush=True)
+    emit_progress(f"Parsing {ext} file...")
 
-    # 1. Real Text Extraction (pypdf)
+    # 1. Text Extraction
+    extracted_text = _extract_text(file_path)
+
+    emit_progress("Chunking text...")
+
+    # 2. Chunking
+    chunks = _chunk_text(extracted_text, rfp_id)
+
+    emit_progress("Generating embeddings and storing...")
+
+    # 3. Store in Chroma
+    try:
+        chroma = ChromaClient()
+        is_chroma_up = await chroma.check_health()
+
+        if is_chroma_up:
+            collection = await chroma.get_or_create_collection(
+                f"rfp_{rfp_id}"
+            )
+            ids = [c["id"] for c in chunks]
+            documents = [c["text"] for c in chunks]
+            metadatas = [
+                {"chunkIndex": i, "source": file_path}
+                for i, _ in enumerate(chunks)
+            ]
+
+            await collection.upsert(
+                ids=ids, documents=documents, metadatas=metadatas
+            )
+        else:
+            emit_warning(
+                "ChromaDB is not running. Ingestion skipped storage phase."
+            )
+    except Exception as err:
+        logger.error(f"Ingestion failed: {err}")
+        raise
+
+    emit_progress(
+        f"Ingestion complete. Processed {len(chunks)} chunks."
+    )
+
+    return {"chunksProcessed": len(chunks)}
+
+
+def _extract_text(file_path: str) -> str:
+    """Extract text from a file, supporting PDF and plain text formats.
+
+    Args:
+        file_path: Path to the file.
+
+    Returns:
+        Extracted text content.
+    """
     extracted_text = ""
     try:
         with open(file_path, "rb") as f:
@@ -63,87 +108,64 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
         extracted_text = ""
 
     if not extracted_text.strip():
-        # Try as plain text file fallback
         try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(
+                file_path, "r", encoding="utf-8", errors="ignore"
+            ) as f:
                 extracted_text = f.read()
         except Exception as e:
             logger.error(f"Failed to read file as text: {e}")
-            extracted_text = f"Unparseable file: {os.path.basename(file_path)}"
+            extracted_text = (
+                f"Unparseable file: {os.path.basename(file_path)}"
+            )
 
-    print(json.dumps({
-        "event": "progress",
-        "portalId": "rag",
-        "message": "Chunking text..."
-    }), flush=True)
+    return extracted_text
 
-    # 2. Recursive-Character Chunking
+
+def _chunk_text(text: str, rfp_id: str) -> List[Dict[str, str]]:
+    """Split text into overlapping chunks for embedding storage.
+
+    Uses a simple word-based chunking strategy with overlap.
+
+    Args:
+        text: The full extracted text.
+        rfp_id: RFP identifier for generating chunk IDs.
+
+    Returns:
+        List of dicts with ``text`` and ``id`` keys.
+    """
     chunk_size = 1500
     chunk_overlap = 150
-    chunks = []
-    
-    words = extracted_text.split()
-    current_chunk = []
+    chunks: List[Dict[str, str]] = []
+
+    words = text.split()
+    current_chunk: List[str] = []
     current_len = 0
     chunk_idx = 0
-    
+
     for word in words:
         current_chunk.append(word)
         current_len += len(word) + 1
         if current_len >= chunk_size:
-            chunks.append({
-                "text": " ".join(current_chunk),
-                "id": f"{rfp_id}-chunk-{chunk_idx}"
-            })
-            chunk_idx += 1
-            current_chunk = current_chunk[-30:] if len(current_chunk) > 30 else []
-            current_len = sum(len(w) + 1 for w in current_chunk)
-            
-    if current_chunk:
-        chunks.append({
-            "text": " ".join(current_chunk),
-            "id": f"{rfp_id}-chunk-{chunk_idx}"
-        })
-
-    print(json.dumps({
-        "event": "progress",
-        "portalId": "rag",
-        "message": "Generating embeddings and storing..."
-    }), flush=True)
-
-    # 3. Store in Chroma
-    try:
-        chroma = ChromaClient()
-        is_chroma_up = await chroma.check_health()
-
-        if is_chroma_up:
-            collection = await chroma.get_or_create_collection(f"rfp_{rfp_id}")
-            ids = [c["id"] for c in chunks]
-            documents = [c["text"] for c in chunks]
-            metadatas = [{"chunkIndex": i, "source": file_path} for i, _ in enumerate(chunks)]
-
-            await collection.upsert(
-                ids=ids,
-                documents=documents,
-                metadatas=metadatas
+            chunks.append(
+                {
+                    "text": " ".join(current_chunk),
+                    "id": f"{rfp_id}-chunk-{chunk_idx}",
+                }
             )
-        else:
-            print(json.dumps({
-                "event": "warning",
-                "message": "ChromaDB is not running. Ingestion skipped storage phase."
-            }), flush=True)
-    except Exception as err:
-        print(json.dumps({
-            "level": "error",
-            "msg": "Ingestion failed",
-            "ctx": str(err)
-        }), flush=True)
-        raise
+            chunk_idx += 1
+            overlap_words = (
+                current_chunk[-30:] if len(current_chunk) > 30 else []
+            )
+            current_chunk = overlap_words
+            current_len = sum(len(w) + 1 for w in overlap_words)
 
-    print(json.dumps({
-        "event": "progress",
-        "portalId": "rag",
-        "message": f"Ingestion complete. Processed {len(chunks)} chunks."
-    }), flush=True)
+    if current_chunk:
+        chunks.append(
+            {
+                "text": " ".join(current_chunk),
+                "id": f"{rfp_id}-chunk-{chunk_idx}",
+            }
+        )
 
-    return {"chunksProcessed": len(chunks)}
+    return chunks

@@ -10,7 +10,7 @@ This document provides an accurate, up-to-date visual and textual overview of th
 | ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------- |
 | **Frontend UI**    | React, TypeScript, Lucide, Tailwind  | Desktop application user interface; communicates with the Tauri core using native IPC.       |
 | **Tauri Core**     | Rust (`src-tauri`)                   | Launches and monitors Python sidecars as subprocesses; manages process lifecycle, Mutex locks, and `sentinel.db` SQLite storage. |
-| **Hunter Sidecar** | Python (Playwright, Gemini API)      | Identifies search selectors on target websites, runs scrapers, and streams back matching RFPs. |
+| **Hunter Sidecar** | Python (Playwright, Ollama)          | Identifies search selectors on target websites, runs scrapers, and streams back matching RFPs. |
 | **RAG Sidecar**    | Python (ChromaDB, Ollama)            | Ingests compliance documents, generates vector embeddings, and executes semantic queries.     |
 | **Gap Engine**     | Python                               | Compliance gap analyzer that parses RFP opportunities to identify structural requirements.    |
 | **Worker Sidecar** | Python (SQLite Queue, `worker_jobs.db`) | Performs background tasks asynchronously, polling a local SQLite job queue database.          |
@@ -107,4 +107,67 @@ The Rust process manager uses robust Mutex locks to synchronize command triggers
 
 ---
 
-_Updated on 2026-06-01._
+### 5. RAG Sidecar Module Architecture
+
+The RAG sidecar provides local retrieval-augmented generation using ChromaDB and Ollama.
+
+| Module | Responsibility |
+|------|------|
+| `server.py` | JSON-RPC IPC dispatcher; handles ingest and query methods |
+| `events.py` | Unified event emission for IPC progress, results, and errors |
+| `ingest.py` | Document ingestion pipeline (PDF/text parsing, chunking, ChromaDB storage) |
+| `ollama_client.py` | Async Ollama API client with Docker loopback resolution |
+| `chroma_client.py` | Async ChromaDB embedded client with lazy initialization |
+| `utils.py` | Shared utilities (Docker loopback resolution) |
+
+All IPC events flow through `events.py` which captures the original stdout before redirection, ensuring JSON-RPC protocol integrity.
+
+### 7. Worker Sidecar Module Architecture
+
+The Worker sidecar provides a SQLite-backed background job processor with content-hash deduplication.
+
+| Module | Responsibility |
+|------|------|
+| `server.py` | JSON-RPC IPC dispatcher + worker polling loop; manages async task lifecycle |
+| `events.py` | Unified event emission for IPC (progress, ready, results, errors) |
+| `db.py` | SQLite database operations (schema init, enqueue, pop, save result) with WAL journaling |
+| `jobs.py` | Business logic: input normalization, SHA-256 content hashing, result formatting |
+
+The worker loop runs as a concurrent asyncio task alongside the JSON-RPC dispatcher, polling the SQLite queue every second. Stuck `processing` jobs are recovered to `pending` on startup, and completed/failed jobs older than 7 days are automatically pruned.
+
+### 6. Gap Engine Sidecar Module Architecture
+
+The Gap Engine analyzes RFP documents for compliance gaps using ChromaDB context and Ollama inference.
+
+| Module | Responsibility |
+|------|------|
+| `server.py` | JSON-RPC IPC dispatcher; handles `analyze_gaps` method |
+| `events.py` | Unified event emission for IPC (progress, gap reports, results, errors) |
+| `gap_analyzer.py` | Core orchestration: ChromaDB context retrieval → Ollama inference → event emission |
+| `chroma_utils.py` | ChromaDB query abstraction (decoupled from RAG internals) |
+| `ollama_utils.py` | Zero-shot auditing prompt builder + response parser with JSON validation |
+| `gap_engine.py` | Backward-compatible import hub (re-exports `analyze_gaps`) |
+
+All gap reports are emitted via `events.emit_gap_report()` and fall back to generic warnings when Ollama inference fails.
+
+### 8. Hunter Sidecar Module Architecture
+
+The Hunter sidecar has been refactored into focused sub-modules for maintainability:
+
+| Module                  | Responsibility                                                |
+| ----------------------- | ------------------------------------------------------------- |
+| `server.py`             | JSON-RPC IPC dispatcher; stdin → async task routing           |
+| `progress_reporter.py`  | Structured event reporting (progress, opportunities, errors)  |
+| `ollama_utils.py`       | Synchronous Ollama HTTP helpers + JSON extraction             |
+| `strategies.py`         | Scraping strategy pattern + `get_strategy()` factory          |
+| `portal_runner.py`      | Per-portal orchestration with rate-limiter lifecycle          |
+| `portal_analyzer.py`    | Portal URL analysis (search bar detection)                    |
+| `rate_limiter.py`       | Token-bucket rate limiting with CAPTCHA pause                |
+| `models.py`             | Pydantic schemas for config and scraped data                  |
+| `scraper_engine.py`     | Backward-compatible import hub (re-exports all public API)    |
+
+All existing import paths (`from ...scraper_engine import ...`) continue to work via the re-export hub.
+
+---
+
+_Updated on 2026-07-29._

@@ -52,18 +52,22 @@ playwright install chromium
 ```
 sidecars/hunter/
 ├── src_py/
-│   ├── server.py              # Async JSON-RPC over stdin/stdout
-│   ├── scraper_engine.py      # Core Playwright & Ollama extraction engine
+│   ├── server.py              # Async JSON-RPC over stdin/stdout (IPC dispatcher)
+│   ├── scraper_engine.py      # Backward-compatible import hub (re-exports from sub-modules)
+│   ├── progress_reporter.py   # Structured real-time event reporting to stdout
+│   ├── ollama_utils.py        # extract_json, fetch_ollama_tags_sync, fetch_ollama_generate_sync
+│   ├── strategies.py          # Strategy pattern: ScrapingStrategy hierarchy + factory
 │   ├── portal_runner.py       # Orchestrator for real-time progress callbacks
 │   ├── portal_analyzer.py     # Local-only schema and portal field heuristics
+│   ├── rate_limiter.py        # Token-bucket rate limiter with jitter / back-off
 │   ├── models.py              # Strict Pydantic validated output schemas
 │   ├── utils/
 │   │   ├── search_detector.py # Centralized JS-injection heuristic search input locator
 │   ├── adapters/
+│   │   ├── __init__.py        # Adapter registry + resolve_adapter()
 │   │   ├── base.py            # Base abstract portal adapter interface
 │   │   ├── brightspyre.py     # Custom adapter for Brightspyre
 │   │   ├── generic.py         # Standard browser-heuristic fallback adapter
-├── package.json               # Simplified CLI commands
 ```
 
 ---

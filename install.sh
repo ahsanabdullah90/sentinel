@@ -97,6 +97,9 @@ fi
 if [ -f "sidecars/worker/requirements.txt" ]; then
     .venv/bin/pip install -r sidecars/worker/requirements.txt --quiet
 fi
+if [ -f "sidecars/gap_engine/requirements.txt" ]; then
+    .venv/bin/pip install -r sidecars/gap_engine/requirements.txt --quiet
+fi
 # Playwright python driver needs its own install step for chromium
 info "Installing Python Playwright browsers..."
 .venv/bin/playwright install chromium

@@ -5,11 +5,11 @@ per-portal ``TokenBucketRateLimiter`` instances and delegates to the
 appropriate ``ScrapingStrategy``.
 """
 
-import json
 import logging
 from typing import Dict, Optional, Callable, Any, Awaitable
 from sidecars.hunter.src_py.rate_limiter import TokenBucketRateLimiter
-from sidecars.hunter.src_py.scraper_engine import get_strategy, ProgressReporter
+from sidecars.hunter.src_py.strategies import get_strategy
+from sidecars.hunter.src_py.progress_reporter import ProgressReporter
 from sidecars.hunter.src_py.models import PortalConfig
 
 logger = logging.getLogger("hunter.portal_runner")
@@ -69,7 +69,6 @@ class PortalRunner:
                 "message": message,
                 "suggestion": "Check the portal configuration and try again."
             }
-            print(json.dumps({"event": "error", **err_data}), flush=True)
-            if on_event:
-                await on_event("error", err_data)
+            logger.error(f"Scrape failed for portal {portal_id}: {message}")
+            await reporter.report_error(message)
             raise

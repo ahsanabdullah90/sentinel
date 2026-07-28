@@ -8,17 +8,14 @@ import time
 from unittest.mock import patch
 import pytest
 
-# Add worker source to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "sidecars", "worker", "src_py"))
-
-from worker import process_job
+from sidecars.worker.src_py.jobs import process_job
 
 
 class TestProcessJob:
     """Unit tests for the concrete job processor."""
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_basic_processing(self, mock_save):
         """process_job should return an enriched result dict."""
         job = {"rfpId": "test-001", "title": "Test RFP"}
@@ -30,14 +27,14 @@ class TestProcessJob:
         assert result["workerVersion"] == "1.0.0"
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_missing_rfp_id_raises(self, mock_save):
         """process_job should raise ValueError if rfpId is missing."""
         with pytest.raises(ValueError, match="rfpId"):
             await process_job(job_id=1, job_data={"title": "no id"})
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_normalisation_strips_whitespace(self, mock_save):
         """String values should be stripped."""
         job = {"rfpId": "  rfp-002  ", "title": "  Hello  "}
@@ -46,7 +43,7 @@ class TestProcessJob:
         assert result["title"] == "Hello"
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_content_hash_deterministic(self, mock_save):
         """Same input should always produce the same hash."""
         job = {"rfpId": "rfp-hash", "data": "value"}
@@ -55,7 +52,7 @@ class TestProcessJob:
         assert r1["contentHash"] == r2["contentHash"]
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_content_hash_differs(self, mock_save):
         """Different input should produce different hashes."""
         r1 = await process_job(job_id=1, job_data={"rfpId": "a", "x": "1"})
@@ -63,20 +60,18 @@ class TestProcessJob:
         assert r1["contentHash"] != r2["contentHash"]
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_processed_at_is_recent(self, mock_save):
-        """processedAt timestamp should be within a few seconds of now."""
+        """processedAt timestamp should be a valid ISO-ish string."""
         job = {"rfpId": "rfp-time"}
         result = await process_job(job_id=1, job_data=job)
-        # Just check it's a valid ISO-ish string
         assert "T" in result["processedAt"]
         assert result["processedAt"].endswith("Z")
 
     @pytest.mark.asyncio
-    @patch("worker.save_result_db")
+    @patch("sidecars.worker.src_py.jobs.save_result")
     async def test_rfp_id_alt_key(self, mock_save):
         """process_job should also accept 'rfp_id' (snake_case)."""
         job = {"rfp_id": "rfp-snake"}
         result = await process_job(job_id=1, job_data=job)
         assert result["status"] == "processed"
-

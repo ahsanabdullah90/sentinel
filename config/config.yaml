@@ -1,4 +1,4 @@
-port: 50051
-chroma_url: 'http://localhost:8000'
+# Sidecar communication uses JSON-RPC 2.0 over stdin/stdout (no network ports).
+# Ollama is accessed via HTTP (localhost:11434) for LLM inference.
 ollama_url: 'http://localhost:11434'
 database_url: 'sqlite:sentinel.db'

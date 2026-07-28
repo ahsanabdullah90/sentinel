@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "tauri": "npx tauri",
     "hunter:install": "cd sidecars/hunter && pip install -e . && playwright install",
-    "sidecars:install": "pip install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap-engine",
+    "sidecars:install": "pip install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine",
     "test": "npx vitest",
     "test:sidecars": "PYTHONPATH=.:sidecars/hunter pytest sidecars/hunter/tests && PYTHONPATH=. pytest tests",
     "test:all": "npm run test && npm run test:sidecars",
