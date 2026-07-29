@@ -174,11 +174,6 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
         let _ = conn.execute("DELETE FROM opportunities WHERE id IN ('101', '102')", []);
         let _ = conn.execute("DELETE FROM opportunities WHERE title LIKE 'Found result for %'", []);
         let _ = conn.execute("DELETE FROM portals WHERE id = '1'", []);
-        let _ = conn.execute(
-            "INSERT OR IGNORE INTO portals (id, name, base_url, auth_method, scraper_module) VALUES ('other', 'Other / Manual', 'http://localhost', 'public', 'manual')",
-            []
-        );
-
         let mut presets_to_update: Vec<String> = Vec::new();
 
         if let Ok(mut stmt) = conn.prepare("SELECT id, base_url, selector_config FROM portals") {
