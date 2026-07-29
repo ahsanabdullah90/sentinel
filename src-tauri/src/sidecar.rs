@@ -46,10 +46,39 @@ pub async fn spawn_python_sidecar(
             sidecar_cmd.spawn().map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?
         }
         Err(err) => {
-            // If the compiled sidecar binary is not available, this is a critical error in production.
-            // We return an explicit error to avoid falling back to a system Python interpreter, which would break portability.
-            error!("Compiled sidecar '{}' not found or failed to load: {}", sidecar_name, err);
-            return Err(crate::errors::SentinelError::Sidecar(format!("Compiled sidecar '{}' missing", sidecar_name)));
+            // Fall back to Python script for development mode
+            let script_path = match sidecar_name {
+                "hunter"    => "sidecars/hunter/src_py/server.py",
+                "rag"       => "sidecars/rag/src_py/server.py",
+                "gap_engine"=> "sidecars/gap_engine/src_py/server.py",
+                "worker"    => "sidecars/worker/src_py/server.py",
+                _ => return Err(crate::errors::SentinelError::Sidecar(format!("Unknown sidecar: {}", sidecar_name))),
+            };
+
+            info!("Compiled sidecar '{}' not found ({}), falling back to Python script: {}", sidecar_name, err, script_path);
+
+            let workspace_root = std::env::current_dir().unwrap_or_default();
+            let full_script_path = workspace_root.join(script_path);
+
+            if !full_script_path.exists() {
+                return Err(crate::errors::SentinelError::Sidecar(format!(
+                    "Sidecar '{}' binary missing and Python script not found at {}",
+                    sidecar_name,
+                    full_script_path.display()
+                )));
+            }
+
+            let cmd = app
+                .shell()
+                .command("python")
+                .args([full_script_path.to_str().unwrap_or_default()]);
+
+            cmd.spawn().map_err(|e| {
+                crate::errors::SentinelError::Sidecar(format!(
+                    "Failed to spawn Python sidecar '{}': {}",
+                    sidecar_name, e
+                ))
+            })?
         }
     };
 
