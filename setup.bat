@@ -16,6 +16,7 @@ echo [1/5] Checking prerequisites...
 node --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [X] Node.js >= 20 is required. Download from https://nodejs.org/
+    pause
     exit /b 1
 )
 for /f "tokens=*" %%i in ('node --version') do echo [OK] Node.js %%i
@@ -24,6 +25,7 @@ for /f "tokens=*" %%i in ('node --version') do echo [OK] Node.js %%i
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [X] Python >= 3.11 is required. Download from https://python.org/
+    pause
     exit /b 1
 )
 for /f "tokens=*" %%i in ('python --version') do echo [OK] %%i
@@ -32,6 +34,7 @@ for /f "tokens=*" %%i in ('python --version') do echo [OK] %%i
 cargo --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [X] Rust toolchain is required. Install from https://rustup.rs/
+    pause
     exit /b 1
 )
 for /f "tokens=*" %%i in ('cargo --version') do echo [OK] %%i
@@ -49,6 +52,7 @@ echo [2/5] Installing Node.js dependencies...
 call npm ci
 if %errorlevel% neq 0 (
     echo [X] npm ci failed.
+    pause
     exit /b 1
 )
 echo [OK] Node dependencies installed.
@@ -63,6 +67,7 @@ if not exist ".venv" (
     python -m venv .venv
     if %errorlevel% neq 0 (
         echo [X] Failed to create Python virtual environment.
+        pause
         exit /b 1
     )
     echo [OK] Virtual environment created at .venv
@@ -73,6 +78,7 @@ echo [i] Installing sidecar packages...
 call .venv\Scripts\pip install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --quiet
 if %errorlevel% neq 0 (
     echo [X] Failed to install sidecar packages.
+    pause
     exit /b 1
 )
 echo [OK] Python sidecar dependencies installed.
@@ -81,7 +87,17 @@ echo [OK] Python sidecar dependencies installed.
 echo.
 echo [4/5] Installing Playwright and Chromium browser...
 call .venv\Scripts\pip install playwright --quiet
+if %errorlevel% neq 0 (
+    echo [X] Failed to install Playwright.
+    pause
+    exit /b 1
+)
 call .venv\Scripts\playwright install chromium
+if %errorlevel% neq 0 (
+    echo [X] Failed to install Chromium browser for Playwright.
+    pause
+    exit /b 1
+)
 echo [OK] Playwright and Chromium installed.
 
 :: 5. Create .env
@@ -97,7 +113,7 @@ if not exist .env (
 :: Done
 echo.
 echo ===================================================
-echo   Setup Complete!
+echo   Setup Complete^^!
 echo ===================================================
 echo.
 echo   Next steps:
@@ -105,3 +121,4 @@ echo     1. Make sure Ollama is running: ollama serve
 echo     2. Run the app: run.bat
 echo.
 echo ===================================================
+pause
