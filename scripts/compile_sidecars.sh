@@ -66,7 +66,7 @@ declare -A SIDECARS=(
     ["hunter"]="sidecars/hunter/src_py/server.py"
     ["rag"]="sidecars/rag/src_py/server.py"
     ["gap_engine"]="sidecars/gap_engine/src_py/server.py"
-    ["worker"]="sidecars/worker/src_py/worker.py"
+    ["worker"]="sidecars/worker/src_py/server.py"
 )
 
 # Run PyInstaller for each sidecar

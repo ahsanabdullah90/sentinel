@@ -27,6 +27,12 @@ if %errorlevel% neq 0 (
     goto :fail
 )
 
+:: Activate virtual environment if present (created by setup.bat)
+if exist ".venv\Scripts\python.exe" (
+    set "PATH=%~dp0.venv\Scripts;%PATH%"
+    echo [i] Using Python virtual environment at .venv
+)
+
 :: Check if node_modules exist
 if not exist "node_modules" (
     echo [i] node_modules not found. Running npm install...

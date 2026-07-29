@@ -14,6 +14,7 @@ fn main() {
         };
         let binary_path = binaries_dir.join(&binary_name);
         if !binary_path.exists() {
+            println!("cargo:warning=Creating dummy sidecar binary for '{}' — run compile_sidecars.sh before production builds", name);
             std::fs::write(
                 &binary_path,
                 if cfg!(target_os = "windows") {

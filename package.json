@@ -6,7 +6,7 @@
   "scripts": {
     "setup": "npm ci && npm run sidecars:install",
     "dev": "vite",
-    "build": "node ./scripts/create_dummy_sidecars.js && tsc && vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "npx tauri",
     "hunter:install": "cd sidecars/hunter && pip install -e . && playwright install",
