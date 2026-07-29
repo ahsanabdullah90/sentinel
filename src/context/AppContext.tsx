@@ -15,6 +15,7 @@ export interface AppContextProps {
   setSessionId: React.Dispatch<React.SetStateAction<string>>;
   huntLogs: string[];
   setHuntLogs: React.Dispatch<React.SetStateAction<string[]>>;
+  huntProgressMap: Record<string, string>;
   schedulerInfo: string;
   setSchedulerInfo: React.Dispatch<React.SetStateAction<string>>;
   portals: Portal[];
@@ -64,6 +65,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [ollamaStatus, setOllamaStatus] = useState('Checking...');
   const [sessionId, setSessionId] = useState('');
   const [huntLogs, setHuntLogs] = useState<string[]>([]);
+  const [huntProgressMap, setHuntProgressMap] = useState<Record<string, string>>({});
   const [schedulerInfo, setSchedulerInfo] = useState('');
   const [portals, setPortals] = useState<Portal[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -179,6 +181,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       await invoke('stop_hunt_session', { sessionId });
       setHunting(false);
       setSessionId('');
+      setHuntProgressMap({});
     } catch (error) {
       console.error('Failed to stop hunt:', error);
     }
@@ -244,6 +247,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } catch (err) {
       console.error('Failed to update portal diagnostics on finish:', err);
     } finally {
+      setHuntProgressMap({});
       void triggerNextQueuePortalRef.current();
     }
   };
@@ -394,6 +398,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           const payload = event.payload;
           if (payload.message) {
             setHuntLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${payload.message}`]);
+            if (payload.portalId) {
+              setHuntProgressMap(prev => ({ ...prev, [payload.portalId!]: payload.message! }));
+            }
             if (payload.message === 'Hunt completed successfully') {
               void finishActiveHuntRef.current(payload.portalId);
             }
@@ -487,6 +494,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setSessionId,
     huntLogs,
     setHuntLogs,
+    huntProgressMap,
     schedulerInfo,
     setSchedulerInfo,
     portals,

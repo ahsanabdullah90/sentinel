@@ -35,6 +35,7 @@ function App() {
     hunting,
     ollamaStatus,
     huntLogs,
+    huntProgressMap,
     schedulerInfo,
     portals,
     opportunities,
@@ -484,6 +485,23 @@ function App() {
                             )}
                           </td>
                           <td>
+                            {huntProgressMap[p.id] ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span className="pulse-dot" style={{
+                                    width: 8, height: 8, borderRadius: '50%',
+                                    backgroundColor: '#4ade80', display: 'inline-block',
+                                    animation: 'pulse 1.5s ease-in-out infinite',
+                                  }} />
+                                  <span style={{ fontSize: '0.75rem', color: '#4ade80', fontWeight: 600 }}>
+                                    Scanning...
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: '0.7rem', color: '#8b90a0', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {huntProgressMap[p.id]}
+                                </span>
+                              </div>
+                            ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                               <div
                                 style={{
@@ -528,6 +546,7 @@ function App() {
                                 </span>
                               </div>
                             </div>
+                            )}
                           </td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
