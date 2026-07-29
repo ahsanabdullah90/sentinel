@@ -211,18 +211,40 @@ pub async fn spawn_python_sidecar(
                                                             .and_then(|e| e.to_str())
                                                             .unwrap_or("unknown")
                                                             .to_string();
-                                                        
+
                                                         // Copy to persistent storage
                                                         let _ = std::fs::write(&target_path, &bytes);
-                                                        
+
                                                         // Store in DB
                                                         let id = uuid::Uuid::new_v4().to_string();
+                                                        let opp_id_owned = opp_id.to_string();
+                                                        let filename_owned = filename.to_string();
                                                         if let Err(e) = crate::db::queries::save_attachment(
-                                                            &app_clone, id, opp_id.to_string(), filename.to_string(), ext, size, bytes
+                                                            &app_clone, id.clone(), opp_id_owned, filename_owned, ext.clone(), size, bytes.clone()
                                                         ) {
                                                             error!("Failed to insert attachment into DB: {}", e);
                                                         }
-                                                        
+
+                                                        // Auto-extract text for PDF attachments
+                                                        if ext == "pdf" {
+                                                            match pdf_extract::extract_text_from_mem(&bytes) {
+                                                                Ok(text) => {
+                                                                    let text_clean = text.trim().to_string();
+                                                                    let char_count = text_clean.chars().count();
+                                                                    info!("Extracted {} chars from PDF attachment {}", char_count, id);
+
+                                                                    if let Err(e) = crate::db::queries::update_attachment_text(
+                                                                        &app_clone, id.clone(), text_clean
+                                                                    ) {
+                                                                        error!("Failed to store extracted PDF text: {}", e);
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    error!("Failed to extract PDF text from attachment {}: {}", id, e);
+                                                                }
+                                                            }
+                                                        }
+
                                                         // Clean up temp file
                                                         let _ = std::fs::remove_file(temp_path);
                                                     } else {

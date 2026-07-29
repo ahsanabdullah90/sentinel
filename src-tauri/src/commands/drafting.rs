@@ -3,17 +3,11 @@ use crate::errors::SentinelError;
 use crate::sidecar::execute_jsonrpc_method;
 
 #[tauri::command]
-pub async fn ingest_document(app: AppHandle, rfp_id: String, file_path: String) -> Result<(), SentinelError> {
-    // 1. Verify file exists via Rust FS
-    if !std::path::Path::new(&file_path).exists() {
-        return Err(SentinelError::Io(format!("File not found: {}", file_path)));
-    }
-
-    // 2. Spawn RAG sidecar for ingestion via JSON-RPC
+pub async fn ingest_document(app: AppHandle, document_id: String, content: String) -> Result<(), SentinelError> {
     let req_id = uuid::Uuid::new_v4().to_string();
     let params = serde_json::json!({
-        "rfp_id": rfp_id,
-        "file_path": file_path
+        "document_id": document_id,
+        "content": content
     });
     execute_jsonrpc_method(app, "rag", "ingest", params, &req_id).await?;
 

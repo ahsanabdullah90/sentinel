@@ -220,6 +220,21 @@ export function OpportunityDetail({
       const unlistenAttDownloaded = listen('sentinel://hunter/attachment-downloaded', (event: any) => {
         if (event.payload?.opportunityId === opportunityId || event.payload?.data?.opportunityId === opportunityId) {
           void loadAttachments(opportunityId);
+          // Trigger RAG ingestion for the downloaded attachment
+          void (async () => {
+            try {
+              const freshAtts = await invoke<AttachmentItem[]>('get_attachments', { oppId: opportunityId });
+              const newest = freshAtts.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+              if (newest?.extracted_text) {
+                await invoke('ingest_document', {
+                  documentId: `${opportunityId}_${newest.id}`,
+                  content: newest.extracted_text,
+                });
+              }
+            } catch (err) {
+              console.error('Failed to auto-ingest attachment into RAG:', err);
+            }
+          })();
         }
       });
 
