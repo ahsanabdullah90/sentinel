@@ -71,7 +71,9 @@ pub async fn spawn_python_sidecar(
 
             info!("Falling back to Python script: {}", script_path);
 
-            let workspace_root = std::env::current_dir().unwrap_or_default();
+            let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let workspace_root = manifest_dir.parent()
+                .expect("CARGO_MANIFEST_DIR parent is workspace root");
             let full_script_path = workspace_root.join(script_path);
 
             if !full_script_path.exists() {
