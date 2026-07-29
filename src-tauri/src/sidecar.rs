@@ -40,13 +40,27 @@ pub async fn spawn_python_sidecar(
         return Ok(child);
     }
 
-    let (mut rx, child) = match app.shell().sidecar(sidecar_name) {
+    // Try compiled binary first; fall back to Python script for development mode
+    let result = match app.shell().sidecar(sidecar_name) {
         Ok(sidecar_cmd) => {
             info!("Spawning sidecar as compiled binary: {}", sidecar_name);
-            sidecar_cmd.spawn().map_err(|e| crate::errors::SentinelError::Sidecar(e.to_string()))?
+            match sidecar_cmd.spawn() {
+                Ok(r) => Ok(r),
+                Err(e) => {
+                    warn!("Binary spawn failed ({}), falling back to Python", e);
+                    Err(())
+                }
+            }
         }
         Err(err) => {
-            // Fall back to Python script for development mode
+            warn!("Compiled sidecar '{}' not found ({}), falling back to Python", sidecar_name, err);
+            Err(())
+        }
+    };
+
+    let (mut rx, child) = match result {
+        Ok(r) => r,
+        Err(_) => {
             let script_path = match sidecar_name {
                 "hunter"    => "sidecars/hunter/src_py/server.py",
                 "rag"       => "sidecars/rag/src_py/server.py",
@@ -55,7 +69,7 @@ pub async fn spawn_python_sidecar(
                 _ => return Err(crate::errors::SentinelError::Sidecar(format!("Unknown sidecar: {}", sidecar_name))),
             };
 
-            info!("Compiled sidecar '{}' not found ({}), falling back to Python script: {}", sidecar_name, err, script_path);
+            info!("Falling back to Python script: {}", script_path);
 
             let workspace_root = std::env::current_dir().unwrap_or_default();
             let full_script_path = workspace_root.join(script_path);
