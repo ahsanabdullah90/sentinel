@@ -80,7 +80,9 @@ echo [i] Checking Python sidecar dependencies...
 !PYTHON! -c "import chromadb; import pypdf; import pydantic" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [^^!] Some Python sidecar dependencies are missing. Installing...
-    !PIP! install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --quiet
+    !PIP! install setuptools wheel greenlet --quiet
+    !PIP! install chromadb pypdf pydantic beautifulsoup4 --no-build-isolation --quiet
+    !PIP! install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --no-build-isolation --no-deps --quiet
     if %errorlevel% neq 0 (
         echo [X] Failed to install Python sidecar dependencies.
         echo [^^!] Try running setup.bat first.

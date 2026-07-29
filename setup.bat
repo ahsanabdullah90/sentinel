@@ -73,9 +73,28 @@ if not exist ".venv" (
     echo [OK] Virtual environment created at .venv
 )
 
-:: Install sidecar packages
+:: Pre-install build dependencies (setuptools not bundled in Python 3.14+;
+:: greenlet >=3.5 has a pre-built wheel for Python 3.14)
+echo [i] Installing build dependencies...
+call .venv\Scripts\pip install setuptools wheel greenlet --quiet
+if %errorlevel% neq 0 (
+    echo [X] Failed to install build dependencies.
+    pause
+    exit /b 1
+)
+
+:: Install runtime dependencies for sidecars
+echo [i] Installing runtime dependencies...
+call .venv\Scripts\pip install chromadb pypdf pydantic beautifulsoup4 --no-build-isolation --quiet
+if %errorlevel% neq 0 (
+    echo [X] Failed to install runtime dependencies.
+    pause
+    exit /b 1
+)
+
+:: Install sidecar packages (editable, skip deps to avoid greenlet rebuild)
 echo [i] Installing sidecar packages...
-call .venv\Scripts\pip install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --quiet
+call .venv\Scripts\pip install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --no-build-isolation --no-deps --quiet
 if %errorlevel% neq 0 (
     echo [X] Failed to install sidecar packages.
     pause
