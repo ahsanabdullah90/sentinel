@@ -15,7 +15,7 @@ echo [i] Running pre-flight checks...
 node --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [X] Node.js is not installed or not in PATH.
-    echo [!] Please install Node.js >= 20 from https://nodejs.org/
+    echo [^^!] Please install Node.js ^>= 20 from https://nodejs.org/
     goto :fail
 )
 
@@ -23,14 +23,20 @@ if %errorlevel% neq 0 (
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [X] Python is not installed or not in PATH.
-    echo [!] Please install Python >= 3.11 from https://python.org/
+    echo [^^!] Please install Python ^>= 3.11 from https://python.org/
     goto :fail
 )
 
-:: Activate virtual environment if present (created by setup.bat)
+:: Use virtual environment if present (created by setup.bat)
 if exist ".venv\Scripts\python.exe" (
+    set "PYTHON=.venv\Scripts\python.exe"
+    set "PIP=.venv\Scripts\pip.exe"
+    :: Prepend to PATH so Tauri sidecar spawning finds the venv's python
     set "PATH=%~dp0.venv\Scripts;%PATH%"
     echo [i] Using Python virtual environment at .venv
+) else (
+    set "PYTHON=python"
+    set "PIP=pip"
 )
 
 :: Check if node_modules exist
@@ -46,10 +52,10 @@ if not exist "node_modules" (
 :: Check Ollama
 netstat -ano | findstr :11434 >nul
 if %errorlevel% neq 0 (
-    echo [!] Ollama is not running on port 11434.
+    echo [^^!] Ollama is not running on port 11434.
     echo [i] Attempting to start Ollama background service...
     start "" /B ollama serve
-    
+
     set /a count=0
     :poll_ollama
     timeout /t 1 /nobreak >nul
@@ -60,7 +66,7 @@ if %errorlevel% neq 0 (
             goto :poll_ollama
         ) else (
             echo [WARNING] Ollama did not start within 10 seconds.
-            echo [!] Please install and start Ollama manually.
+            echo [^^!] Please install and start Ollama manually.
         )
     ) else (
         echo [OK] Ollama service started successfully.
@@ -71,17 +77,34 @@ if %errorlevel% neq 0 (
 
 :: Check Python sidecar dependencies
 echo [i] Checking Python sidecar dependencies...
-python -c "import chromadb; import pypdf; import pydantic" >nul 2>&1
+!PYTHON! -c "import chromadb; import pypdf; import pydantic" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [!] Some Python sidecar dependencies are missing. Installing...
-    pip install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --quiet
+    echo [^^!] Some Python sidecar dependencies are missing. Installing...
+    !PIP! install -e ./sidecars/hunter -e ./sidecars/rag -e ./sidecars/worker -e ./sidecars/gap_engine --quiet
+    if %errorlevel% neq 0 (
+        echo [X] Failed to install Python sidecar dependencies.
+        echo [^^!] Try running setup.bat first.
+        goto :fail
+    )
+    :: Verify installation succeeded
+    !PYTHON! -c "import chromadb; import pypdf; import pydantic" >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [X] Python sidecar dependencies still missing after install.
+        goto :fail
+    )
+    echo [OK] Python sidecar dependencies installed.
 )
 
 :: Check Playwright
-python -c "from playwright.async_api import async_playwright" >nul 2>&1
+!PYTHON! -c "from playwright.async_api import async_playwright" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [!] Playwright is not installed. Installing...
-    pip install playwright --quiet
+    echo [^^!] Playwright is not installed. Installing...
+    !PIP! install playwright --quiet
+    if %errorlevel% neq 0 (
+        echo [X] Failed to install Playwright.
+        goto :fail
+    )
+    echo [OK] Playwright installed.
 )
 
 :: Check if .env exists
@@ -100,7 +123,7 @@ call npm run tauri dev
 if %errorlevel% neq 0 (
     echo.
     echo [X] Tauri dev server exited with an error.
-    echo [!] Check the error messages above for details.
+    echo [^^!] Check the error messages above for details.
     goto :cleanup
 )
 
@@ -119,9 +142,11 @@ echo [i] Terminating residue Python sidecar processes...
 wmic process where "commandline like '%%sidecars%%'" call terminate >nul 2>&1
 
 echo [OK] Cleanup complete. Exiting.
+pause
 goto :eof
 
 :fail
 echo.
 echo [X] Pre-flight checks failed. Please fix the issues above and try again.
+pause
 exit /b 1
