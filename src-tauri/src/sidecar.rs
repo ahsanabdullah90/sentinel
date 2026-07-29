@@ -87,7 +87,8 @@ pub async fn spawn_python_sidecar(
             let cmd = app
                 .shell()
                 .command("python")
-                .args([full_script_path.to_str().unwrap_or_default()]);
+                .args([full_script_path.to_str().unwrap_or_default()])
+                .env("PYTHONPATH", workspace_root.to_str().unwrap_or_default());
 
             cmd.spawn().map_err(|e| {
                 crate::errors::SentinelError::Sidecar(format!(
