@@ -324,8 +324,13 @@ class GenericSearchStrategy(ScrapingStrategy):
                         }"""
                         )
 
+                        plain_text = await page.evaluate(
+                            "() => document.body.innerText"
+                        )
+
                         await reporter.report_progress(
-                            f"[{keyword}] Cleaned HTML size: {len(cleaned_html)} chars. "
+                            f"[{keyword}] Cleaned HTML size: {len(cleaned_html)} chars, "
+                            f"plain text size: {len(plain_text)} chars. "
                             f"Contained keyword: {keyword.lower() in cleaned_html.lower()}."
                         )
 
@@ -341,6 +346,7 @@ class GenericSearchStrategy(ScrapingStrategy):
                                     page.url,
                                     config,
                                     reporter,
+                                    plain_text=plain_text,
                                 )
                                 break
                             except Exception as e:
@@ -567,8 +573,134 @@ class GenericSearchStrategy(ScrapingStrategy):
         current_url: str,
         config: PortalConfig,
         reporter: ProgressReporter,
+        plain_text: str = "",
     ) -> List[RFPOpportunity]:
-        """Call local Ollama to extract opportunities from *cleaned_html*."""
+        """Call local Ollama to extract opportunities from page content."""
+
+        async def _run_extraction(
+            content: str, source_label: str
+        ) -> List[RFPOpportunity]:
+            """Run one extraction pass on *content* (HTML or plain text)."""
+            prompt = f"""
+Task: Extract job/opportunity listings from the following {source_label}.
+Filter opportunities based on the keyword "{keyword}".
+Output ONLY a valid JSON array of objects, containing "title", "description", "url", "publishDate", "dueDate", and "agency".
+Format matches:
+[
+  {{
+    "title": "Title of the job posting",
+    "description": "Description of the job",
+    "url": "Link to the job page",
+    "publishDate": "Date published, or empty if unknown",
+    "dueDate": "Closing date, or empty if unknown",
+    "agency": "Hiring company name"
+  }}
+]
+If no matches are found, output an empty array: []
+
+Content:
+{content[:50000]}
+"""
+
+            opportunities: List[RFPOpportunity] = []
+            parsed = None
+            success = False
+
+            try:
+                payload = {
+                    "model": target_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "options": {"temperature": 0.1},
+                }
+
+                response_text = await asyncio.to_thread(
+                    fetch_ollama_generate_sync, ollama_url, payload
+                )
+
+                if response_text:
+                    await reporter.report_progress(
+                        f"[{keyword}] Ollama responded ({len(response_text)} chars) from {source_label}"
+                    )
+
+                    is_refusal = (
+                        "sorry" in response_text.lower()
+                        or "can't assist" in response_text.lower()
+                        or "cannot assist" in response_text.lower()
+                        or "don't have the ability" in response_text.lower()
+                        or "unable to assist" in response_text.lower()
+                    )
+
+                    if not is_refusal:
+                        try:
+                            parsed_data = json.loads(response_text)
+                            parsed = parsed_data
+                            success = True
+                        except json.JSONDecodeError as decode_err:
+                            logger.warning(
+                                f"[{keyword}] Ollama response was not valid JSON: {response_text[:200]}, error: {str(decode_err)}"
+                            )
+                            await reporter.report_progress(
+                                f"[{keyword}] Ollama response was not valid JSON: {str(decode_err)}"
+                            )
+                    else:
+                        await reporter.report_progress(
+                            f"[{keyword}] Ollama refused to extract from {source_label}"
+                        )
+                else:
+                    logger.warning(f"[{keyword}] Ollama returned empty response")
+                    await reporter.report_progress(
+                        f"[{keyword}] Ollama returned empty response"
+                    )
+            except Exception as model_err:
+                logger.error(
+                    f"[{keyword}] Model extraction error: {str(model_err)}"
+                )
+                await reporter.report_progress(
+                    f"[{keyword}] Ollama model extraction failed: {str(model_err)}"
+                )
+
+            if success and parsed:
+                items = []
+                if isinstance(parsed, list):
+                    items = parsed
+                elif isinstance(parsed, dict):
+                    items = parsed.get("opportunities") or parsed.get("jobs") or []
+
+                if isinstance(items, list):
+                    for item in items:
+                        try:
+                            raw_ext = OllamaExtraction.model_validate(item)
+
+                            full_url = raw_ext.url or current_url
+                            if full_url.startswith("/"):
+                                parsed_base = urlparse(base_url)
+                                full_url = f"{parsed_base.scheme}://{parsed_base.netloc}{full_url}"
+                            elif not full_url.startswith("http"):
+                                parsed_base = urlparse(base_url)
+                                full_url = f"{parsed_base.scheme}://{parsed_base.netloc}/{full_url}"
+
+                            opp = RFPOpportunity(
+                                id=secrets.token_hex(8),
+                                portalId=portal_id,
+                                title=raw_ext.title or "Untitled Opportunity",
+                                description=raw_ext.description or "",
+                                url=full_url,
+                                publishDate=raw_ext.publishDate or "",
+                                dueDate=raw_ext.dueDate or "",
+                                agency=raw_ext.agency or "Unknown",
+                                status="open",
+                            )
+                            opportunities.append(opp)
+                            await reporter.report_opportunity(opp)
+                        except Exception as val_err:
+                            logger.warning(
+                                f"Skipping malformed extraction item: {item}, error: {str(val_err)}"
+                            )
+
+            return opportunities
+
         await reporter.report_progress(
             f"[{keyword}] Initiating local Ollama extraction..."
         )
@@ -653,115 +785,16 @@ class GenericSearchStrategy(ScrapingStrategy):
             f"[{keyword}] Selected dynamic Ollama model: {target_model}"
         )
 
-        prompt = f"""
-        Task: Convert the listed job postings in the following HTML snippet into a structured JSON list of objects.
-        Filter jobs based on the keyword "{keyword}".
-        Output ONLY a valid JSON array of objects, containing "title", "description", "url", "publishDate", "dueDate", and "agency".
-        Format matches:
-        [
-          {{
-            "title": "Title of the job posting",
-            "description": "Description of the job",
-            "url": "Link to the job page",
-            "publishDate": "Date published, or empty if unknown",
-            "dueDate": "Closing date, or empty if unknown",
-            "agency": "Hiring company name"
-          }}
-        ]
-        If no matches are found, output an empty array: []
+        # Try HTML extraction first, then fall back to plain text
+        opportunities = await _run_extraction(cleaned_html, "HTML snippet")
+        if opportunities:
+            return opportunities
 
-        HTML context:
-        {cleaned_html[:50000]}
-        """
-
-        opportunities: List[RFPOpportunity] = []
-        parsed = None
-        success = False
-
-        try:
-            payload = {
-                "model": target_model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.1},
-            }
-
-            response_text = await asyncio.to_thread(
-                fetch_ollama_generate_sync, ollama_url, payload
-            )
-
-            if response_text:
-                is_refusal = (
-                    "sorry" in response_text.lower()
-                    or "can't assist" in response_text.lower()
-                    or "cannot assist" in response_text.lower()
-                    or "don't have the ability" in response_text.lower()
-                    or "unable to assist" in response_text.lower()
-                )
-
-                if not is_refusal:
-                    try:
-                        parsed_data = json.loads(response_text)
-                        parsed = parsed_data
-                        success = True
-                    except json.JSONDecodeError as decode_err:
-                        logger.warning(
-                            f"[{keyword}] Ollama response was not valid JSON: {response_text}, error: {str(decode_err)}"
-                        )
-                        await reporter.report_progress(
-                            f"[{keyword}] Ollama response was not valid JSON: {str(decode_err)}"
-                        )
-            else:
-                logger.warning(f"[{keyword}] Ollama returned empty response")
-                await reporter.report_progress(
-                    f"[{keyword}] Ollama returned empty response"
-                )
-        except Exception as model_err:
-            logger.error(
-                f"[{keyword}] Model extraction error: {str(model_err)}"
-            )
+        if plain_text:
             await reporter.report_progress(
-                f"[{keyword}] Ollama model extraction failed: {str(model_err)}"
+                f"[{keyword}] HTML extraction returned no results, trying plain text..."
             )
-
-        if success and parsed:
-            items = []
-            if isinstance(parsed, list):
-                items = parsed
-            elif isinstance(parsed, dict):
-                items = parsed.get("opportunities") or parsed.get("jobs") or []
-
-            if isinstance(items, list):
-                for item in items:
-                    try:
-                        raw_ext = OllamaExtraction.model_validate(item)
-
-                        full_url = raw_ext.url or current_url
-                        if full_url.startswith("/"):
-                            parsed_base = urlparse(base_url)
-                            full_url = f"{parsed_base.scheme}://{parsed_base.netloc}{full_url}"
-                        elif not full_url.startswith("http"):
-                            parsed_base = urlparse(base_url)
-                            full_url = f"{parsed_base.scheme}://{parsed_base.netloc}/{full_url}"
-
-                        opp = RFPOpportunity(
-                            id=secrets.token_hex(8),
-                            portalId=portal_id,
-                            title=raw_ext.title or "Untitled Opportunity",
-                            description=raw_ext.description or "",
-                            url=full_url,
-                            publishDate=raw_ext.publishDate or "",
-                            dueDate=raw_ext.dueDate or "",
-                            agency=raw_ext.agency or "Unknown",
-                            status="open",
-                        )
-                        opportunities.append(opp)
-                        await reporter.report_opportunity(opp)
-                    except Exception as val_err:
-                        logger.warning(
-                            f"Skipping malformed extraction item: {item}, error: {str(val_err)}"
-                        )
+            opportunities = await _run_extraction(plain_text, "plain text")
 
         return opportunities
 
