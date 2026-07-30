@@ -71,6 +71,13 @@ def _resolve_opportunity_urls(
             best_score = 0.0
 
             for link_text, link_href in links:
+                # Prefer exact substring match (title appears verbatim in link text)
+                if opp_title in link_text:
+                    match_href = link_href
+                    best_score = 1.0
+                    break
+
+                # Fallback: word-overlap scoring for non-verbatim titles
                 link_words = set(link_text.split())
                 if not link_words:
                     continue
@@ -434,11 +441,22 @@ class GenericSearchStrategy(ScrapingStrategy):
                                     await reporter.report_progress(
                                         f"Deep crawling opportunity: {opp.title}"
                                     )
-                                    await deep_page.goto(
+                                    response = await deep_page.goto(
                                         opp.url,
                                         wait_until="domcontentloaded",
                                         timeout=30000,
                                     )
+
+                                    # Skip deep-crawl for non-200 responses (404, 500, etc.)
+                                    if response and response.status >= 400:
+                                        logger.warning(
+                                            f"Deep crawl skipped: HTTP {response.status} for {opp.url}"
+                                        )
+                                        await reporter.report_progress(
+                                            f"Skipped deep crawl for '{opp.title}' (HTTP {response.status})"
+                                        )
+                                        await deep_page.close()
+                                        continue
 
                                     full_desc = await deep_page.evaluate(
                                         r"""() => {
