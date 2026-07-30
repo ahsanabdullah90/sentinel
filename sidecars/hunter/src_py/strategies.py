@@ -31,6 +31,72 @@ from sidecars.hunter.src_py.ollama_utils import (
 logger = logging.getLogger("hunter.strategies")
 
 
+def _resolve_opportunity_urls(
+    opportunities: List[RFPOpportunity],
+    cleaned_html: str,
+    base_url: str,
+) -> None:
+    """Resolve opportunity URLs from cleaned HTML to avoid Ollama hallucination.
+
+    Matches extracted opportunity titles against <a> tag text content in the original
+    cleaned HTML, then uses the real href attribute instead of the LLM-generated URL.
+    """
+    if not opportunities or not cleaned_html:
+        return
+
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(cleaned_html, "html.parser")
+        links = []
+        for a in soup.find_all("a", href=True):
+            text = a.get_text(strip=True)
+            href = a["href"].strip()
+            if text and href and not href.startswith("#") and not href.startswith("javascript"):
+                links.append((text.lower(), href))
+
+        if not links:
+            return
+
+        for opp in opportunities:
+            opp_title = opp.title.lower().strip()
+            if not opp_title:
+                continue
+
+            title_words = set(opp_title.split())
+            if not title_words:
+                continue
+
+            match_href = None
+            best_score = 0.0
+
+            for link_text, link_href in links:
+                link_words = set(link_text.split())
+                if not link_words:
+                    continue
+                overlap = len(title_words & link_words)
+                score = overlap / max(len(title_words), len(link_words))
+                if score > best_score:
+                    best_score = score
+                    match_href = link_href
+
+            if match_href and best_score >= 0.3:
+                if match_href.startswith("http"):
+                    opp.url = match_href
+                elif match_href.startswith("/"):
+                    parsed = urlparse(base_url)
+                    opp.url = f"{parsed.scheme}://{parsed.netloc}{match_href}"
+                else:
+                    opp.url = urljoin(base_url, match_href)
+                logger.info(
+                    f"Resolved URL for '{opp.title}': {opp.url} (score={best_score:.2f})"
+                )
+    except ImportError:
+        logger.warning("BeautifulSoup not available for URL resolution")
+    except Exception as e:
+        logger.warning(f"URL resolution failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
@@ -788,6 +854,7 @@ Content:
         # Try HTML extraction first, then fall back to plain text
         opportunities = await _run_extraction(cleaned_html, "HTML snippet")
         if opportunities:
+            _resolve_opportunity_urls(opportunities, cleaned_html, base_url)
             return opportunities
 
         if plain_text:
@@ -795,6 +862,8 @@ Content:
                 f"[{keyword}] HTML extraction returned no results, trying plain text..."
             )
             opportunities = await _run_extraction(plain_text, "plain text")
+            if opportunities:
+                _resolve_opportunity_urls(opportunities, cleaned_html, base_url)
 
         return opportunities
 
