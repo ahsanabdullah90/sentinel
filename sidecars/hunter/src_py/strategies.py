@@ -458,6 +458,34 @@ class GenericSearchStrategy(ScrapingStrategy):
                                         await deep_page.close()
                                         continue
 
+                                    # Content-based "Not Found" detection (custom error pages often return 200)
+                                    page_text = await deep_page.evaluate(
+                                        "() => document.body.innerText"
+                                    )
+                                    not_found_indicators = [
+                                        "not found",
+                                        "404",
+                                        "page not found",
+                                        "does not exist",
+                                        "no such page",
+                                        "the page you",
+                                        "sorry, we couldn",
+                                        "could not find",
+                                        "doesn't exist",
+                                    ]
+                                    if any(
+                                        indicator in page_text.lower()
+                                        for indicator in not_found_indicators
+                                    ):
+                                        logger.warning(
+                                            f"Deep crawl skipped: 'Not Found' content detected for {opp.url}"
+                                        )
+                                        await reporter.report_progress(
+                                            f"Skipped deep crawl for '{opp.title}' (Not Found page detected)"
+                                        )
+                                        await deep_page.close()
+                                        continue
+
                                     full_desc = await deep_page.evaluate(
                                         r"""() => {
                                         const container = document.querySelector('.job-detail, .description, .content, main, article, #content');
