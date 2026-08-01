@@ -214,16 +214,24 @@ pub fn record_opportunity(
     Ok(true)
 }
 
-pub fn update_opportunity_description(
+pub fn update_opportunity_details(
     app: &AppHandle,
     id: String,
     description: String,
+    url: Option<String>,
 ) -> Result<(), SentinelError> {
     let conn = get_db_connection(app)?;
-    conn.execute(
-        "UPDATE opportunities SET description = ? WHERE id = ?",
-        params![description, id]
-    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    if let Some(url) = url {
+        conn.execute(
+            "UPDATE opportunities SET description = ?, url = ? WHERE id = ?",
+            params![description, url, id]
+        ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    } else {
+        conn.execute(
+            "UPDATE opportunities SET description = ? WHERE id = ?",
+            params![description, id]
+        ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    }
     Ok(())
 }
 

@@ -1,9 +1,53 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::{ShellExt, process::{CommandEvent, CommandChild}};
 use tracing::{error, info, warn};
 use tokio::sync::oneshot;
+
+/// Extract plain text from a DOCX (zip containing word/document.xml) byte blob.
+fn extract_docx_text_from_mem(bytes: &[u8]) -> Result<String, String> {
+    let reader = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
+
+    let mut document_xml = Vec::new();
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        if file.name() == "word/document.xml" {
+            file.read_to_end(&mut document_xml).map_err(|e| e.to_string())?;
+            break;
+        }
+    }
+
+    if document_xml.is_empty() {
+        return Err("word/document.xml not found in DOCX".to_string());
+    }
+
+    // Strip tags but keep paragraph / tab boundaries as whitespace for readability.
+    let xml = String::from_utf8_lossy(&document_xml);
+    let text = xml
+        .replace("</w:p>", "\n")
+        .replace("</w:tab>", "\t")
+        .replace("<w:br/>", "\n");
+    // Remove all remaining XML tags
+    let mut clean = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => clean.push(ch),
+            _ => {}
+        }
+    }
+    let collapsed: Vec<String> = clean
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    Ok(collapsed.join("\n"))
+}
 
 pub struct SidecarRegistry {
     pub processes: Mutex<HashMap<String, Arc<Mutex<Option<CommandChild>>>>>,
@@ -181,8 +225,13 @@ pub async fn spawn_python_sidecar(
                                         if let Ok(opp) = serde_json::from_str::<serde_json::Value>(payload_str) {
                                             if let Some(id) = opp.get("id").and_then(|v| v.as_str()) {
                                                 if let Some(description) = opp.get("description").and_then(|v| v.as_str()) {
-                                                    if let Err(e) = crate::db::queries::update_opportunity_description(&app_clone, id.to_string(), description.to_string()) {
-                                                        error!("Failed to update opportunity description: {}", e);
+                                                    if let Err(e) = crate::db::queries::update_opportunity_details(
+                                                        &app_clone,
+                                                        id.to_string(),
+                                                        description.to_string(),
+                                                        opp.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                                    ) {
+                                                        error!("Failed to update opportunity details: {}", e);
                                                     }
                                                 }
                                             }
@@ -225,23 +274,29 @@ pub async fn spawn_python_sidecar(
                                                             error!("Failed to insert attachment into DB: {}", e);
                                                         }
 
-                                                        // Auto-extract text for PDF attachments
-                                                        if ext == "pdf" {
-                                                            match pdf_extract::extract_text_from_mem(&bytes) {
-                                                                Ok(text) => {
-                                                                    let text_clean = text.trim().to_string();
-                                                                    let char_count = text_clean.chars().count();
-                                                                    info!("Extracted {} chars from PDF attachment {}", char_count, id);
+                                                        // Auto-extract text for PDF / DOCX attachments
+                                                        let extracted: Result<String, String> = match ext.as_str() {
+                                                            "pdf" => pdf_extract::extract_text_from_mem(&bytes).map_err(|e| e.to_string()),
+                                                            "docx" => extract_docx_text_from_mem(&bytes),
+                                                            _ => Ok(String::new()),
+                                                        };
+                                                        match extracted {
+                                                            Ok(text) if !text.trim().is_empty() => {
+                                                                let text_clean = text.trim().to_string();
+                                                                let char_count = text_clean.chars().count();
+                                                                info!("Extracted {} chars from {} attachment {}", char_count, ext, id);
 
-                                                                    if let Err(e) = crate::db::queries::update_attachment_text(
-                                                                        &app_clone, id.clone(), text_clean
-                                                                    ) {
-                                                                        error!("Failed to store extracted PDF text: {}", e);
-                                                                    }
+                                                                if let Err(e) = crate::db::queries::update_attachment_text(
+                                                                    &app_clone, id.clone(), text_clean
+                                                                ) {
+                                                                    error!("Failed to store extracted {} text: {}", ext, e);
                                                                 }
-                                                                Err(e) => {
-                                                                    error!("Failed to extract PDF text from attachment {}: {}", id, e);
-                                                                }
+                                                            }
+                                                            Ok(_) => {
+                                                                info!("No extractable text for {} attachment {}", ext, id);
+                                                            }
+                                                            Err(e) => {
+                                                                error!("Failed to extract text from {} attachment {}: {}", ext, id, e);
                                                             }
                                                         }
 

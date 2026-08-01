@@ -355,7 +355,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const unlisteners: (() => void)[] = [];
 
     const setupListeners = async () => {
-      const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
+      const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__?.transformCallback;
       if (!isTauri) return;
 
       interface ProgressPayload {

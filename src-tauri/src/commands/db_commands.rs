@@ -107,6 +107,38 @@ pub async fn get_attachment_bytes(app: AppHandle, id: String) -> Result<Option<V
 }
 
 #[tauri::command]
+pub async fn open_attachment(app: AppHandle, id: String, file_name: String) -> Result<String, SentinelError> {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+
+    let bytes = crate::db::queries::get_attachment_bytes(&app, id)?
+        .ok_or_else(|| SentinelError::Database("Attachment bytes not found".to_string()))?;
+
+    let mut attach_dir = app.path().app_config_dir()
+        .map_err(|e| SentinelError::Database(format!("Failed to resolve app config dir: {e}")))?;
+    attach_dir.push("attachments");
+    std::fs::create_dir_all(&attach_dir)
+        .map_err(|e| SentinelError::Database(format!("Failed to create attachments dir: {e}")))?;
+
+    // Sanitize the file name so we never write outside the attachments dir
+    let safe_name = file_name
+        .rsplit(['/', '\\']).next().unwrap_or("attachment")
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>();
+    let path = attach_dir.join(safe_name);
+    std::fs::write(&path, &bytes)
+        .map_err(|e| SentinelError::Database(format!("Failed to write attachment: {e}")))?;
+
+    let opener = app.opener();
+    let path_str = path.to_string_lossy().to_string();
+    opener.open_path(&path_str, None::<&str>)
+        .map_err(|e| SentinelError::Database(format!("Failed to open attachment: {e}")))?;
+
+    Ok(path_str)
+}
+
+#[tauri::command]
 pub async fn get_proposal_drafts(app: AppHandle) -> Result<Vec<ProposalDraft>, SentinelError> {
     crate::db::queries::get_proposal_drafts(&app)
 }

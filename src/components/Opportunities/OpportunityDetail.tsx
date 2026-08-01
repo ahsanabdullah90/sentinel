@@ -203,12 +203,21 @@ export function OpportunityDetail({
     }
   }
 
+  async function handleOpenAttachment(att: AttachmentItem) {
+    try {
+      const path = await invoke<string>('open_attachment', { id: att.id, fileName: att.file_name });
+      console.log('Opened attachment at:', path);
+    } catch (err) {
+      console.error('Failed to open attachment:', err);
+    }
+  }
+
   useEffect(() => {
     void loadOpportunityDetails();
     void loadKbItems();
     void loadAttachments(opportunityId);
 
-    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS?.transformCallback;
+    const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__?.transformCallback;
     if (!isTauri) return;
 
     import('@tauri-apps/api/event').then(({ listen }) => {
@@ -1608,6 +1617,14 @@ End of Auto-Generated Proposal Draft.`;
                           {att.file_type}
                         </span>
                       </div>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => handleOpenAttachment(att)}
+                        style={{ color: 'var(--accent-color)', padding: '4px' }}
+                        title="Open attachment"
+                      >
+                        <ExternalLink size={13} />
+                      </button>
                       <button
                         className="btn btn-ghost btn-xs"
                         onClick={() => handleDeleteAttachment(att.id)}

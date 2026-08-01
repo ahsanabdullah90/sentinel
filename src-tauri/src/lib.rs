@@ -315,6 +315,7 @@ pub fn run() {
             commands::db_commands::delete_attachment,
             commands::db_commands::update_attachment_text,
             commands::db_commands::get_attachment_bytes,
+            commands::db_commands::open_attachment,
             commands::db_commands::get_proposal_drafts,
             commands::db_commands::save_proposal_draft,
             commands::db_commands::update_proposal_draft,

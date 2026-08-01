@@ -104,6 +104,19 @@ def _resolve_opportunity_urls(
         logger.warning(f"URL resolution failed: {e}")
 
 
+async def _reemit_resolved_opportunities(
+    opportunities: List[RFPOpportunity],
+    reporter: ProgressReporter,
+) -> None:
+    """Re-emit opportunities after URL resolution so the backend persists the
+    corrected URL (the initial ``opportunity_found`` event fires before URL
+    resolution and carries the raw Ollama URL).
+    """
+    for opp in opportunities:
+        if opp.url and opp.url.startswith("http"):
+            await reporter.report_opportunity_updated(opp)
+
+
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
@@ -901,6 +914,7 @@ Content:
         opportunities = await _run_extraction(cleaned_html, "HTML snippet")
         if opportunities:
             _resolve_opportunity_urls(opportunities, cleaned_html, base_url)
+            await _reemit_resolved_opportunities(opportunities, reporter)
             return opportunities
 
         if plain_text:
@@ -910,6 +924,7 @@ Content:
             opportunities = await _run_extraction(plain_text, "plain text")
             if opportunities:
                 _resolve_opportunity_urls(opportunities, cleaned_html, base_url)
+                await _reemit_resolved_opportunities(opportunities, reporter)
 
         return opportunities
 

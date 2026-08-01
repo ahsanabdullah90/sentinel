@@ -43,3 +43,4 @@ tempfile = "3.10.1"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 chrono = "0.4.38"
 pdf-extract = "0.7.0"
+zip = "2"
