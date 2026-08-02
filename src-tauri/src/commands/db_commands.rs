@@ -69,6 +69,32 @@ pub async fn update_opportunity_status(app: AppHandle, id: String, status: Strin
 }
 
 #[tauri::command]
+pub async fn update_opportunity_priority(app: AppHandle, id: String, priority: String) -> Result<(), SentinelError> {
+    crate::db::queries::update_opportunity_priority(&app, id, priority)
+}
+
+#[tauri::command]
+pub async fn apply_opportunity(
+    app: AppHandle,
+    id: String,
+    applied_at: String,
+    submission_ref: Option<String>,
+    apply_notes: Option<String>,
+) -> Result<(), SentinelError> {
+    crate::db::queries::apply_opportunity(&app, id, applied_at, submission_ref, apply_notes)
+}
+
+#[tauri::command]
+pub async fn dismiss_opportunity(app: AppHandle, id: String, dismiss_note: String) -> Result<(), SentinelError> {
+    crate::db::queries::dismiss_opportunity(&app, id, dismiss_note)
+}
+
+#[tauri::command]
+pub async fn expire_not_applied(app: AppHandle) -> Result<usize, SentinelError> {
+    crate::db::queries::expire_not_applied(&app)
+}
+
+#[tauri::command]
 pub async fn get_opportunity_detail(app: AppHandle, id: String) -> Result<Option<Opportunity>, SentinelError> {
     crate::db::queries::get_opportunity_detail(&app, id)
 }

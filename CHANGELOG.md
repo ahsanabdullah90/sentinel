@@ -5,6 +5,24 @@ All notable changes to the Sentinel project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-08-02
+
+### Added
+
+- **Opportunity Priority (3-tier)**: New `priority` column (`high` / `medium` / `low` / `none`) with a per-card toggle in the Opportunities modal and a colored badge (red/amber/blue) on feed rows and the detail view. Priority sorts opportunities within each section so high-priority work is surfaced first.
+- **Application Tracking**: Merged disposition into the existing `status` field (they are the same axis). New `applied` status with metadata (`applied_at`, `submission_ref`, `apply_notes`) captured through an inline "Mark as Applied" form.
+- **Dismissed Lifecycle**: New `dismissed` status with a `dismiss_note`. Dismissed opportunities are greyed out and grouped at the bottom under a "Dismissed" heading. A manual "Dismiss" action sets the note to `not interested`.
+- **Auto-Expiry**: `expire_not_applied` runs on app bootstrap and every time the Opportunities modal opens. Not-applied opportunities whose deadline has passed are automatically moved to `dismissed` with the note `deadline expired`. Applied opportunities are always retained.
+- **Grouped Modal**: The Opportunities modal now renders opportunities under three headings — **Not Applied**, **Applied**, **Dismissed** — with within-section sorting by priority then deadline.
+- **Attachment Open**: New `open_attachment` command writes stored attachment bytes to the attachments directory and opens them with the OS default application (external-link button on each attachment row).
+- **DOCX Text Extraction**: Rust-side extraction of `word/document.xml` from DOCX files (via the `zip` crate) so DOCX attachments receive `extracted_text` and can be RAG-ingested alongside PDFs.
+- **Real-Time Frontend Events**: Fixed the Tauri internals guard (`__TAURI_INTERNALS__`) so event listeners register and the opportunity feed updates live during hunts.
+- **Correct Persisted URLs**: Opportunities are re-emitted after hybrid URL resolution so the database stores real `/jobs/<id>` URLs instead of hallucinated slugs.
+
+### Fixed
+
+- `update_opportunity_description` generalized to `update_opportunity_details` so the backend persists the corrected URL on `opportunity_updated`.
+
 ## [1.1.0] - 2026-07-25
 
 ### Added

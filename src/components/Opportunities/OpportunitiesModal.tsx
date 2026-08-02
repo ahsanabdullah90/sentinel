@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Search, ChevronUp, ChevronDown, Sparkles, ExternalLink, Trash2, Plus } from 'lucide-react';
+import { X, Search, ChevronUp, ChevronDown, Sparkles, ExternalLink, Trash2, Plus, CheckCircle, XCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
@@ -14,6 +14,11 @@ export interface Opportunity {
   url?: string | null;
   portal_base_url?: string | null;
   description?: string | null;
+  priority?: string;
+  applied_at?: string;
+  submission_ref?: string;
+  apply_notes?: string;
+  dismiss_note?: string;
 }
 
 interface Props {
@@ -34,6 +39,12 @@ export function OpportunitiesModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
 
+  // Apply form state
+  const [applyingOpp, setApplyingOpp] = useState<Opportunity | null>(null);
+  const [applyDate, setApplyDate] = useState('');
+  const [applyRef, setApplyRef] = useState('');
+  const [applyNotes, setApplyNotes] = useState('');
+
   // Manual creation states
   const [isAdding, setIsAdding] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -51,6 +62,12 @@ export function OpportunitiesModal({
       invoke<{ id: string; name: string }[]>('get_portals')
         .then(setPortals)
         .catch((err) => console.error('Failed to load portals in modal:', err));
+      // Auto-move expired (not-applied) opportunities to dismissed
+      invoke<number>('expire_not_applied')
+        .then((n) => {
+          if (n > 0) onRefresh();
+        })
+        .catch((err) => console.error('Failed to expire opportunities:', err));
     }
   }, [isOpen]);
 
@@ -157,17 +174,6 @@ export function OpportunitiesModal({
     {} as Record<string, number>
   );
 
-  // Filtered Opportunities
-  const filtered = opportunities.filter((opp) => {
-    const matchesSearch =
-      opp.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      opp.portal.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (opp.issuing_org || '').toLowerCase().includes(searchQuery.toLowerCase());
-
-    if (selectedStatus === 'all') return matchesSearch;
-    return matchesSearch && (opp.status || 'discovered') === selectedStatus;
-  });
-
   // Handler to update status of an opportunity in the DB
   const handleStatusChange = async (oppId: string, newStatus: string) => {
     try {
@@ -176,6 +182,320 @@ export function OpportunitiesModal({
     } catch (err) {
       console.error('Failed to update opportunity status:', err);
     }
+  };
+
+  const handleSetPriority = async (oppId: string, priority: string) => {
+    try {
+      await invoke('update_opportunity_priority', { id: oppId, priority });
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to update priority:', err);
+    }
+  };
+
+  const handleDismiss = async (opp: Opportunity) => {
+    try {
+      await invoke('dismiss_opportunity', { id: opp.id, dismissNote: 'not interested' });
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to dismiss opportunity:', err);
+    }
+  };
+
+  const openApplyForm = (opp: Opportunity) => {
+    setApplyingOpp(opp);
+    setApplyDate(new Date().toISOString().slice(0, 10));
+    setApplyRef('');
+    setApplyNotes('');
+  };
+
+  const submitApply = async () => {
+    if (!applyingOpp) return;
+    try {
+      await invoke('apply_opportunity', {
+        id: applyingOpp.id,
+        appliedAt: applyDate || new Date().toISOString().slice(0, 10),
+        submissionRef: applyRef || null,
+        applyNotes: applyNotes || null,
+      });
+      setApplyingOpp(null);
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to mark as applied:', err);
+    }
+  };
+
+  // Priority rank for sorting within a section (high > medium > low > none)
+  const priorityRank = (p: string | undefined): number => {
+    switch (p) {
+      case 'high': return 0;
+      case 'medium': return 1;
+      case 'low': return 2;
+      default: return 3;
+    }
+  };
+
+  const isDismissed = (opp: Opportunity): boolean => (opp.status || 'discovered') === 'dismissed';
+  const isApplied = (opp: Opportunity): boolean => (opp.status || 'discovered') === 'applied';
+
+  // Search + status filter, then group into sections: Not Applied, Applied, Dismissed
+  const baseFiltered = opportunities
+    .filter((opp) => {
+      const matchesSearch =
+        opp.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        opp.portal.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (opp.issuing_org || '').toLowerCase().includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
+      if (selectedStatus === 'all') return true;
+      return (opp.status || 'discovered') === selectedStatus;
+    })
+    .sort((a, b) => {
+      // Applied/dismissed group headings fixed; priority + deadline sort within sections
+      const ra = priorityRank(a.priority);
+      const rb = priorityRank(b.priority);
+      if (ra !== rb) return ra - rb;
+      const da = a.date || '9999';
+      const db = b.date || '9999';
+      return da.localeCompare(db);
+    });
+
+  const notApplied = baseFiltered.filter((o) => !isApplied(o) && !isDismissed(o));
+  const applied = baseFiltered.filter((o) => isApplied(o));
+  const dismissed = baseFiltered.filter((o) => isDismissed(o));
+
+  const priorityColor = (p: string | undefined): string => {
+    switch (p) {
+      case 'high': return '#ff5f57';
+      case 'medium': return '#ffb340';
+      case 'low': return '#4da3ff';
+      default: return '#8b90a0';
+    }
+  };
+
+  const renderCard = (opp: Opportunity) => {
+    const statusVal = opp.status || 'discovered';
+    const greyed = isDismissed(opp);
+    const appliedFlag = isApplied(opp);
+    const priority = opp.priority || 'none';
+
+    return (
+      <div
+        key={opp.id}
+        className="card glass"
+        style={{
+          marginBottom: '12px',
+          padding: '16px',
+          border: '1px solid rgba(255,255,255,0.08)',
+          backgroundColor: greyed ? '#161617' : '#111112',
+          opacity: greyed ? 0.5 : 1,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <h3 style={{ color: greyed ? '#8b90a0' : '#fff', margin: 0, fontSize: '1rem' }}>
+            {opp.title}
+          </h3>
+          <span style={{ color: '#8b90a0', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+            Deadline: {opp.date || 'No Date'}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Priority badge + toggle */}
+          <span
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              color: priorityColor(priority),
+              border: `1px solid ${priorityColor(priority)}55`,
+              borderRadius: '6px',
+              padding: '2px 8px',
+            }}
+          >
+            {priority === 'none' ? 'No Priority' : priority}
+          </span>
+          <select
+            value={priority}
+            onChange={(e) => void handleSetPriority(opp.id, e.target.value)}
+            style={{
+              padding: '3px 6px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: '#e5e2e3',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="none" style={{ backgroundColor: '#1c1b1c' }}>None</option>
+            <option value="high" style={{ backgroundColor: '#1c1b1c' }}>High</option>
+            <option value="medium" style={{ backgroundColor: '#1c1b1c' }}>Medium</option>
+            <option value="low" style={{ backgroundColor: '#1c1b1c' }}>Low</option>
+          </select>
+        </div>
+
+        <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
+          <strong>Issuing Org:</strong> {opp.issuing_org || 'N/A'}
+        </div>
+        <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
+          <strong>Portal:</strong> {opp.portal}
+        </div>
+        {opp.description && (
+          <div style={{ color: '#c0c5d0', fontSize: '0.85rem', marginTop: '4px', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {opp.description}
+          </div>
+        )}
+        {greyed && opp.dismiss_note && (
+          <div style={{ color: '#8b90a0', fontSize: '0.75rem', fontStyle: 'italic' }}>
+            Dismissed — {opp.dismiss_note}
+          </div>
+        )}
+        {appliedFlag && (
+          <div style={{ color: '#2ecc71', fontSize: '0.75rem' }}>
+            Applied on {opp.applied_at || '—'}{opp.submission_ref ? ` · Ref: ${opp.submission_ref}` : ''}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <select
+            value={statusVal}
+            onChange={(e) => void handleStatusChange(opp.id, e.target.value)}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: '#e5e2e3',
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="discovered" style={{ backgroundColor: '#1c1b1c' }}>Discovered</option>
+            <option value="downloaded" style={{ backgroundColor: '#1c1b1c' }}>Downloaded</option>
+            <option value="ingested" style={{ backgroundColor: '#1c1b1c' }}>Ingested</option>
+            <option value="drafted" style={{ backgroundColor: '#1c1b1c' }}>Drafted</option>
+            <option value="applied" style={{ backgroundColor: '#1c1b1c' }}>Applied</option>
+            <option value="dismissed" style={{ backgroundColor: '#1c1b1c' }}>Dismissed</option>
+          </select>
+          {!appliedFlag && !greyed && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => openApplyForm(opp)}
+              style={{
+                display: 'inline-flex',
+                gap: '4px',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                color: '#2ecc71',
+                cursor: 'pointer',
+                backgroundColor: 'transparent',
+                border: '1px solid #2ecc7155',
+                padding: '4px 8px',
+                borderRadius: '6px',
+              }}
+            >
+              <CheckCircle size={12} />
+              Apply
+            </button>
+          )}
+          {!greyed && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => void handleDismiss(opp)}
+              style={{
+                display: 'inline-flex',
+                gap: '4px',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                color: '#8b90a0',
+                cursor: 'pointer',
+                backgroundColor: 'transparent',
+                border: '1px solid rgba(255,255,255,0.15)',
+                padding: '4px 8px',
+                borderRadius: '6px',
+              }}
+            >
+              <XCircle size={12} />
+              Dismiss
+            </button>
+          )}
+          <button
+            onClick={() => {
+              const link = opp.url || opp.portal_base_url || '';
+              if (link) openUrl(link).catch(console.error);
+            }}
+            className="btn btn-sm btn-ghost"
+            style={{
+              display: 'inline-flex',
+              gap: '4px',
+              alignItems: 'center',
+              fontSize: '0.75rem',
+              color: 'var(--accent-color)',
+              cursor: 'pointer',
+              backgroundColor: 'transparent',
+              border: 'none',
+              padding: '4px 8px',
+            }}
+          >
+            <ExternalLink size={12} />
+            Go to Web
+          </button>
+          <button
+            className="btn btn-sm btn-ghost"
+            onClick={() => {
+              if (onSelectOpportunity) {
+                onSelectOpportunity(opp.id);
+                onClose();
+              }
+            }}
+            style={{
+              display: 'inline-flex',
+              gap: '4px',
+              alignItems: 'center',
+              fontSize: '0.75rem',
+            }}
+          >
+            <Sparkles size={12} style={{ color: 'var(--accent-color)' }} />
+            Evaluate RFP
+          </button>
+          <button
+            className="btn btn-sm btn-ghost"
+            onClick={async () => {
+              if (!confirm('Are you sure you want to delete this opportunity?')) return;
+              try {
+                await invoke('delete_opportunity', { id: opp.id });
+                onRefresh();
+              } catch (err) {
+                console.error('Failed to delete opportunity:', err);
+              }
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '4px',
+              color: '#ff3b30',
+              borderRadius: '6px',
+              marginLeft: 'auto',
+            }}
+            title="Delete Opportunity"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    );
   };
 
   // Scroll completion progress percentage
@@ -566,152 +886,65 @@ export function OpportunitiesModal({
           }}
           className="opportunities-list-container"
         >
-          {/* Card list */}
-          {filtered.length === 0 ? (
+          {/* Card list grouped under headings */}
+          {baseFiltered.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#8b90a0' }}>
               No opportunities matching the filters found.
             </div>
           ) : (
-            filtered.map((opp) => {
-              const statusVal = opp.status || 'discovered';
-              return (
-                <div
-                  key={opp.id}
-                  className="card glass"
-                  style={{
-                    marginBottom: '12px',
-                    padding: '16px',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    backgroundColor: '#111112',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
+            <>
+              {notApplied.length > 0 && (
+                <div style={{ marginBottom: '12px' }}>
                   <div
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      color: '#8b90a0',
+                      marginBottom: '8px',
                     }}
                   >
-                    <h3 style={{ color: '#fff', margin: 0, fontSize: '1rem' }}>{opp.title}</h3>
-                    <span style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
-                      Deadline: {opp.date || 'No Date'}
-                    </span>
+                    Not Applied ({notApplied.length})
                   </div>
-                  <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
-                    <strong>Issuing Org:</strong> {opp.issuing_org || 'N/A'}
-                  </div>
-                  <div style={{ color: '#8b90a0', fontSize: '0.85rem' }}>
-                    <strong>Portal:</strong> {opp.portal}
-                  </div>
-                  {opp.description && (
-                    <div style={{ color: '#c0c5d0', fontSize: '0.85rem', marginTop: '4px', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {opp.description}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <select
-                      value={statusVal}
-                      onChange={(e) => {
-                        void handleStatusChange(opp.id, e.target.value);
-                      }}
-                      style={{
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        backgroundColor: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        color: '#e5e2e3',
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <option value="discovered" style={{ backgroundColor: '#1c1b1c' }}>
-                        Discovered
-                      </option>
-                      <option value="downloaded" style={{ backgroundColor: '#1c1b1c' }}>
-                        Downloaded
-                      </option>
-                      <option value="ingested" style={{ backgroundColor: '#1c1b1c' }}>
-                        Ingested
-                      </option>
-                      <option value="drafted" style={{ backgroundColor: '#1c1b1c' }}>
-                        Drafted
-                      </option>
-                      <option value="submitted" style={{ backgroundColor: '#1c1b1c' }}>
-                        Submitted
-                      </option>
-                    </select>
-                    <button
-                      onClick={() => {
-                        const link = opp.url || opp.portal_base_url || '';
-                        if (link) {
-                          openUrl(link).catch(console.error);
-                        }
-                      }}
-                      className="btn btn-sm btn-ghost"
-                      style={{
-                        display: 'inline-flex',
-                        gap: '4px',
-                        alignItems: 'center',
-                        fontSize: '0.75rem',
-                        color: 'var(--accent-color)',
-                        cursor: 'pointer',
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        padding: '4px 8px'
-                      }}
-                    >
-                      <ExternalLink size={12} />
-                      Go to Web
-                    </button>
-                    <button
-                      className="btn btn-sm btn-ghost"
-                      onClick={() => {
-                        if (onSelectOpportunity) {
-                          onSelectOpportunity(opp.id);
-                          onClose();
-                        }
-                      }}
-                      style={{
-                        display: 'inline-flex',
-                        gap: '4px',
-                        alignItems: 'center',
-                        fontSize: '0.75rem',
-                      }}
-                    >
-                      <Sparkles size={12} style={{ color: 'var(--accent-color)' }} />
-                      Evaluate RFP
-                    </button>
-                    <button
-                      className="btn btn-sm btn-ghost"
-                      onClick={async () => {
-                        if (!confirm('Are you sure you want to delete this opportunity?')) return;
-                        try {
-                          await invoke('delete_opportunity', { id: opp.id });
-                          onRefresh();
-                        } catch (err) {
-                          console.error('Failed to delete opportunity:', err);
-                        }
-                      }}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '4px',
-                        color: '#ff3b30',
-                        borderRadius: '6px',
-                        marginLeft: 'auto',
-                      }}
-                      title="Delete Opportunity"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                  {notApplied.map(renderCard)}
                 </div>
-              );
-            })
+              )}
+              {applied.length > 0 && (
+                <div style={{ marginBottom: '12px' }}>
+                  <div
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      color: '#2ecc71',
+                      marginBottom: '8px',
+                    }}
+                  >
+                    Applied ({applied.length})
+                  </div>
+                  {applied.map(renderCard)}
+                </div>
+              )}
+              {dismissed.length > 0 && (
+                <div style={{ marginBottom: '12px' }}>
+                  <div
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      color: '#666b76',
+                      marginBottom: '8px',
+                    }}
+                  >
+                    Dismissed ({dismissed.length})
+                  </div>
+                  {dismissed.map(renderCard)}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -727,13 +960,125 @@ export function OpportunitiesModal({
           }}
         >
           <span style={{ fontSize: '0.8rem', color: '#8b90a0' }}>
-            Showing {filtered.length} of {opportunities.length} opportunities
+            Showing {baseFiltered.length} of {opportunities.length} opportunities
           </span>
           <button className="btn btn-secondary btn-sm" onClick={onClose}>
             Close Window
           </button>
         </div>
       </div>
+
+      {/* Apply form modal */}
+      {applyingOpp && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            backgroundColor: 'rgba(0,0,0,0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+          }}
+          onClick={() => setApplyingOpp(null)}
+        >
+          <div
+            className="card glass"
+            style={{
+              width: '420px',
+              maxWidth: '92vw',
+              padding: '20px',
+              backgroundColor: '#141415',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '12px',
+              }}
+            >
+              <h3 style={{ color: '#fff', margin: 0, fontSize: '1rem' }}>Mark as Applied</h3>
+              <button
+                onClick={() => setApplyingOpp(null)}
+                style={{ background: 'transparent', border: 'none', color: '#8b90a0', cursor: 'pointer' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ color: '#8b90a0', fontSize: '0.85rem', marginBottom: '14px' }}>
+              {applyingOpp.title}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                Date Applied
+                <input
+                  type="date"
+                  value={applyDate}
+                  onChange={(e) => setApplyDate(e.target.value)}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#e5e2e3',
+                    fontSize: '0.85rem',
+                  }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                Submission Reference
+                <input
+                  type="text"
+                  value={applyRef}
+                  onChange={(e) => setApplyRef(e.target.value)}
+                  placeholder="e.g. RFP-2026-041"
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#e5e2e3',
+                    fontSize: '0.85rem',
+                  }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                Notes
+                <textarea
+                  value={applyNotes}
+                  onChange={(e) => setApplyNotes(e.target.value)}
+                  placeholder="Optional notes about the submission"
+                  rows={3}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#e5e2e3',
+                    fontSize: '0.85rem',
+                    resize: 'vertical',
+                  }}
+                />
+              </label>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setApplyingOpp(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={() => void submitApply()}>
+                Save Application
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

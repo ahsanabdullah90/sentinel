@@ -108,6 +108,16 @@ pub fn init() -> Vec<Migration> {
                   ALTER TABLE proposal_drafts ADD COLUMN updated_at TEXT;
                   UPDATE portals SET opportunities_count = 0;",
             kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 12,
+            description: "add_priority_and_apply_dismiss_metadata",
+            sql: "ALTER TABLE opportunities ADD COLUMN priority TEXT DEFAULT 'none';
+                  ALTER TABLE opportunities ADD COLUMN applied_at TEXT;
+                  ALTER TABLE opportunities ADD COLUMN submission_ref TEXT;
+                  ALTER TABLE opportunities ADD COLUMN apply_notes TEXT;
+                  ALTER TABLE opportunities ADD COLUMN dismiss_note TEXT;",
+            kind: MigrationKind::Up,
         }
     ]
 }

@@ -29,6 +29,11 @@ pub struct Opportunity {
     pub url: Option<String>,
     pub portal_base_url: Option<String>,
     pub description: Option<String>,
+    pub priority: Option<String>,
+    pub applied_at: Option<String>,
+    pub submission_ref: Option<String>,
+    pub apply_notes: Option<String>,
+    pub dismiss_note: Option<String>,
 }
 
 pub fn get_db_connection(app: &AppHandle) -> Result<Connection, SentinelError> {
@@ -85,7 +90,7 @@ pub fn fetch_portals(app: &AppHandle) -> Result<Vec<Portal>, SentinelError> {
 pub fn fetch_opportunities(app: &AppHandle) -> Result<Vec<Opportunity>, SentinelError> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, p.name, o.url, p.base_url, o.description FROM opportunities o JOIN portals p ON o.portal_id = p.id ORDER BY o.created_at DESC"
+        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, p.name, o.url, p.base_url, o.description, o.priority, o.applied_at, o.submission_ref, o.apply_notes, o.dismiss_note FROM opportunities o JOIN portals p ON o.portal_id = p.id ORDER BY o.created_at DESC"
     ).map_err(|e| SentinelError::Database(e.to_string()))?;
 
     let rows = stmt.query_map([], |row| {
@@ -99,6 +104,11 @@ pub fn fetch_opportunities(app: &AppHandle) -> Result<Vec<Opportunity>, Sentinel
             url: row.get(6)?,
             portal_base_url: row.get(7)?,
             description: row.get(8)?,
+            priority: row.get(9)?,
+            applied_at: row.get(10)?,
+            submission_ref: row.get(11)?,
+            apply_notes: row.get(12)?,
+            dismiss_note: row.get(13)?,
         })
     }).map_err(|e| SentinelError::Database(e.to_string()))?;
 
@@ -332,10 +342,82 @@ pub fn update_opportunity_status(app: &AppHandle, id: String, status: String) ->
     Ok(())
 }
 
+pub fn update_opportunity_priority(app: &AppHandle, id: String, priority: String) -> Result<(), SentinelError> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE opportunities SET priority = ? WHERE id = ?",
+        params![priority, id]
+    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    Ok(())
+}
+
+pub fn apply_opportunity(
+    app: &AppHandle,
+    id: String,
+    applied_at: String,
+    submission_ref: Option<String>,
+    apply_notes: Option<String>,
+) -> Result<(), SentinelError> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE opportunities SET status = 'applied', applied_at = ?, submission_ref = ?, apply_notes = ? WHERE id = ?",
+        params![applied_at, submission_ref, apply_notes, id]
+    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    Ok(())
+}
+
+pub fn dismiss_opportunity(app: &AppHandle, id: String, dismiss_note: String) -> Result<(), SentinelError> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE opportunities SET status = 'dismissed', dismiss_note = ? WHERE id = ?",
+        params![dismiss_note, id]
+    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    Ok(())
+}
+
+pub fn expire_not_applied(app: &AppHandle) -> Result<usize, SentinelError> {
+    let conn = get_db_connection(app)?;
+    let now = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    let mut stmt = conn.prepare(
+        "SELECT id, deadline_at FROM opportunities WHERE status IN ('discovered', 'downloaded', 'ingested', 'drafted')"
+    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    }).map_err(|e| SentinelError::Database(e.to_string()))?;
+
+    let mut ids: Vec<String> = Vec::new();
+    for row in rows {
+        if let Ok((id, deadline)) = row {
+            if let Some(deadline) = deadline {
+                let normalized = deadline
+                    .trim()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                if !normalized.is_empty() && normalized.as_str() < now.as_str() {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+
+    for id in &ids {
+        conn.execute(
+            "UPDATE opportunities SET status = 'dismissed', dismiss_note = 'deadline expired' WHERE id = ?",
+            params![id]
+        ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    }
+
+    Ok(ids.len())
+}
+
 pub fn get_opportunity_detail(app: &AppHandle, id: String) -> Result<Option<Opportunity>, SentinelError> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, p.name, o.url, p.base_url, o.description 
+        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, p.name, o.url, p.base_url, o.description, o.priority, o.applied_at, o.submission_ref, o.apply_notes, o.dismiss_note 
          FROM opportunities o JOIN portals p ON o.portal_id = p.id WHERE o.id = ?"
     ).map_err(|e| SentinelError::Database(e.to_string()))?;
 
@@ -352,6 +434,11 @@ pub fn get_opportunity_detail(app: &AppHandle, id: String) -> Result<Option<Oppo
             url: row.get(6).map_err(|e| SentinelError::Database(e.to_string()))?,
             portal_base_url: row.get(7).map_err(|e| SentinelError::Database(e.to_string()))?,
             description: row.get(8).map_err(|e| SentinelError::Database(e.to_string()))?,
+            priority: row.get(9).map_err(|e| SentinelError::Database(e.to_string()))?,
+            applied_at: row.get(10).map_err(|e| SentinelError::Database(e.to_string()))?,
+            submission_ref: row.get(11).map_err(|e| SentinelError::Database(e.to_string()))?,
+            apply_notes: row.get(12).map_err(|e| SentinelError::Database(e.to_string()))?,
+            dismiss_note: row.get(13).map_err(|e| SentinelError::Database(e.to_string()))?,
         }))
     } else {
         Ok(None)

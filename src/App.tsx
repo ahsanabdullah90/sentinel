@@ -703,7 +703,60 @@ function App() {
                               e.currentTarget.style.color = '#fff';
                             }}
                           >
-                            {o.title}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {o.priority && o.priority !== 'none' && (
+                                <span
+                                  style={{
+                                    fontSize: '0.6rem',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                    color: o.priority === 'high' ? '#ff5f57' : o.priority === 'medium' ? '#ffb340' : '#4da3ff',
+                                    border: `1px solid ${o.priority === 'high' ? '#ff5f57' : o.priority === 'medium' ? '#ffb340' : '#4da3ff'}55`,
+                                    borderRadius: '5px',
+                                    padding: '1px 6px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {o.priority}
+                                </span>
+                              )}
+                              {o.status === 'dismissed' && (
+                                <span
+                                  style={{
+                                    fontSize: '0.6rem',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                    color: '#666b76',
+                                    border: '1px solid #666b7655',
+                                    borderRadius: '5px',
+                                    padding: '1px 6px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  Dismissed
+                                </span>
+                              )}
+                              {o.status === 'applied' && (
+                                <span
+                                  style={{
+                                    fontSize: '0.6rem',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.04em',
+                                    color: '#2ecc71',
+                                    border: '1px solid #2ecc7155',
+                                    borderRadius: '5px',
+                                    padding: '1px 6px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  Applied
+                                </span>
+                              )}
+                              <span>{o.title}</span>
+                            </div>
                           </td>
                           <td>{o.portal}</td>
                           <td>{o.date}</td>

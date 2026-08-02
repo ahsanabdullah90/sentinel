@@ -30,6 +30,11 @@ interface Opportunity {
   url?: string | null;
   portal_base_url?: string | null;
   description?: string | null;
+  priority?: string;
+  applied_at?: string;
+  submission_ref?: string;
+  apply_notes?: string;
+  dismiss_note?: string;
 }
 
 interface KnowledgeItem {
@@ -723,6 +728,54 @@ End of Auto-Generated Proposal Draft.`;
                 <span className="badge badge-secondary" style={{ textTransform: 'capitalize' }}>
                   Status: {opp.status || 'discovered'}
                 </span>
+                {opp.priority && opp.priority !== 'none' && (
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: opp.priority === 'high' ? '#ff5f57' : opp.priority === 'medium' ? '#ffb340' : '#4da3ff',
+                      border: `1px solid ${opp.priority === 'high' ? '#ff5f57' : opp.priority === 'medium' ? '#ffb340' : '#4da3ff'}55`,
+                      borderRadius: '6px',
+                      padding: '3px 8px',
+                    }}
+                  >
+                    Priority: {opp.priority}
+                  </span>
+                )}
+                {opp.status === 'applied' && (
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: '#2ecc71',
+                      border: '1px solid #2ecc7155',
+                      borderRadius: '6px',
+                      padding: '3px 8px',
+                    }}
+                  >
+                    Applied{opp.applied_at ? ` · ${opp.applied_at}` : ''}
+                  </span>
+                )}
+                {opp.status === 'dismissed' && (
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: '#666b76',
+                      border: '1px solid #666b7655',
+                      borderRadius: '6px',
+                      padding: '3px 8px',
+                    }}
+                  >
+                    Dismissed{opp.dismiss_note ? ` · ${opp.dismiss_note}` : ''}
+                  </span>
+                )}
                 <span style={{ fontSize: '0.8rem', color: '#8b90a0' }}>ID: {opp.id}</span>
               </div>
 

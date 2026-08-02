@@ -24,4 +24,9 @@ export interface Opportunity {
   url?: string | null;
   portal_base_url?: string | null;
   description?: string | null;
+  priority?: string;
+  applied_at?: string;
+  submission_ref?: string;
+  apply_notes?: string;
+  dismiss_note?: string;
 }

@@ -18,7 +18,8 @@ The Tauri shell acts as the secure desktop container and orchestrator for the Se
 - **System**: `bootstrap_system`, `check_ollama_status`, `get_ollama_models`, `extract_pdf_text_from_bytes`
 - **Database (Portals)**: `get_portals`, `save_portal`, `delete_portal`, `toggle_portal_status`, `finish_active_hunt`
 - **Database (Opportunities)**: `get_opportunities_list`, `get_opportunity_detail`, `update_opportunity_status`, `delete_opportunity`
-- **Database (Attachments)**: `get_attachments`, `save_attachment`, `delete_attachment`, `update_attachment_text`, `get_attachment_bytes`
+- **Database (Priority / Application / Dismiss)**: `update_opportunity_priority`, `apply_opportunity`, `dismiss_opportunity`, `expire_not_applied`
+- **Database (Attachments)**: `get_attachments`, `save_attachment`, `delete_attachment`, `update_attachment_text`, `get_attachment_bytes`, `open_attachment`
 - **Database (Drafts & KB)**: `get_proposal_drafts`, `save_proposal_draft`, `update_proposal_draft`, `delete_proposal_draft`, `get_knowledge_base`, `save_knowledge_item`, `delete_knowledge_item`
 - **Hunting**: `start_hunt_session`, `stop_hunt_session`, `detect_portal`
 - **AI/RAG**: `analyze_gaps`, `generate_chat_response`, `generate_vision_description`, `ingest_document`, `generate_draft`

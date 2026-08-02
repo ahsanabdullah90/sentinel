@@ -1,4 +1,5 @@
 use tauri::Manager;
+use tracing::info;
 
 pub mod commands;
 pub mod db;
@@ -196,6 +197,13 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
                 rusqlite::params![config_preset, "Browser (Playwright)".to_string(), id],
             );
         }
+
+        // Auto-move expired (not-applied) opportunities to dismissed
+        if let Ok(expired) = crate::db::queries::expire_not_applied(&app) {
+            if expired > 0 {
+                info!("Moved {} expired opportunities to dismissed", expired);
+            }
+        }
     }
 
     // 1. We poll and verify all services running inside the Docker compose network or host-based sidecars.
@@ -309,6 +317,10 @@ pub fn run() {
             commands::db_commands::set_scheduler_timestamp,
             commands::db_commands::delete_opportunity,
             commands::db_commands::update_opportunity_status,
+            commands::db_commands::update_opportunity_priority,
+            commands::db_commands::apply_opportunity,
+            commands::db_commands::dismiss_opportunity,
+            commands::db_commands::expire_not_applied,
             commands::db_commands::get_opportunity_detail,
             commands::db_commands::get_attachments,
             commands::db_commands::save_attachment,
