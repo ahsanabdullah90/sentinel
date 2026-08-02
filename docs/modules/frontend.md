@@ -19,7 +19,7 @@ The frontend provides the user interface for the Sentinel RFP Agent. It allows u
 - **Opportunities** (`OpportunitiesModal.tsx`, `OpportunityDetail.tsx`): Browsing and detailing crawled RFPs. The modal groups opportunities under **Not Applied**, **Applied**, and **Dismissed** headings, with per-card priority selection, an "Apply" form (date / reference / notes), and a "Dismiss" action. Expired not-applied opportunities auto-move to Dismissed with a `deadline expired` note on open. Manual addition supports both a **Paste Link** mode (auto-fetches title / organization / deadline / description via `fetch_opportunity_from_url`) and a full **Manual Entry** form; portal selection is optional. The detail view supports inline editing of core fields.
 - **Knowledge Base** (`KnowledgeBaseDashboard.tsx`): Managing vector store document indices.
 - **Gap Report** (`GapReport.tsx`): Multi-dimensional compliance gap and risk matrix reports with try-catch safety guards.
-- **Settings** (`SettingsModal.tsx`): Configuring model preferences (Ollama settings, model names).
+- **Settings** (`SettingsModal.tsx`): Configuring the AI provider — **Google Gemini** (API key + model) or **Ollama (Local)** (URL + model). On boot the app auto-detects Ollama; if absent it falls back to Google and prompts the user to connect a provider before running hunts.
 
 ### Tauri Commands Called (`invoke`)
 - `get_portals`, `save_portal`, `delete_portal`, `toggle_portal_status`, `finish_active_hunt`
@@ -31,6 +31,7 @@ The frontend provides the user interface for the Sentinel RFP Agent. It allows u
 - `get_knowledge_base`, `save_knowledge_item`, `delete_knowledge_item`
 - `start_hunt_session`, `stop_hunt_session`, `detect_portal`
 - `analyze_gaps`, `generate_chat_response`, `generate_vision_description`, `ingest_document`, `generate_draft`
+- `check_llm_provider`, `get_llm_models`
 
 ## State & Data Flow
 1. **Trigger**: Component executes an asynchronous Tauri command using `invoke`.

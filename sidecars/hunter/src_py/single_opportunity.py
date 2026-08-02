@@ -2,21 +2,16 @@
 
 Provides ``extract_single_opportunity`` which fetches a single opportunity URL
 via Playwright, validates that it is a real page (not a 404 / custom error page),
-and uses local Ollama to extract structured opportunity details.
+and uses the configured LLM provider (Google Gemini or Ollama) to extract
+structured opportunity details.
 """
 
-import asyncio
-import json
 import logging
-import os
 
 from playwright.async_api import async_playwright
 
-from sidecars.hunter.src_py.ollama_utils import (
-    fetch_ollama_generate_sync,
-    fetch_ollama_tags_sync,
-    extract_json,
-)
+from sidecars.shared.llm_client import generate, list_models, LLMConfig
+from sidecars.hunter.src_py.ollama_utils import extract_json
 
 logger = logging.getLogger("hunter.single_opportunity")
 
@@ -42,9 +37,16 @@ _PREFERRED_MODELS = [
 ]
 
 
-def _pick_model(ollama_url: str) -> str:
+async def _pick_model(cfg: LLMConfig) -> str:
+    """Pick the best available model for the active provider."""
+    if cfg.is_google:
+        return cfg.google_model or "gemini-2.5-flash"
     try:
-        avail = fetch_ollama_tags_sync(ollama_url)
+        avail = await list_models(
+            provider=cfg.provider,
+            ollama_url=cfg.ollama_url,
+            google_api_key=cfg.google_api_key,
+        )
         for pref in _PREFERRED_MODELS:
             match = next((m for m in avail if pref in m.lower()), None)
             if match:
@@ -56,13 +58,18 @@ def _pick_model(ollama_url: str) -> str:
     return "qwen3:8b"
 
 
-async def extract_single_opportunity(url: str) -> dict:
-    """Fetch *url* and extract structured opportunity fields via Ollama.
+async def extract_single_opportunity(url: str, provider_config: dict = None) -> dict:
+    """Fetch *url* and extract structured opportunity fields via the LLM provider.
+
+    Args:
+        url: The opportunity detail page URL.
+        provider_config: Optional dict with ``provider``, ``google_api_key``,
+            ``google_model``, ``ollama_url``, ``ollama_model``.
 
     Returns a dict with keys ``title``, ``description``, ``agency``,
     ``dueDate``, and ``url``. On failure, returns an ``error`` key.
     """
-    ollama_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+    cfg = LLMConfig(**(provider_config or {}))
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -102,7 +109,7 @@ async def extract_single_opportunity(url: str) -> dict:
             }"""
             )
 
-            target_model = _pick_model(ollama_url)
+            target_model = await _pick_model(cfg)
             prompt = f"""
 Task: Extract the opportunity/job listing details from the following HTML snippet.
 The web page title is: {page_title}
@@ -117,21 +124,17 @@ Content:
 {cleaned_html[:50000]}
 """
 
-            payload = {
-                "model": target_model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.1},
-            }
-
-            response_text = await asyncio.to_thread(
-                fetch_ollama_generate_sync, ollama_url, payload
+            response_text = await generate(
+                prompt,
+                model=target_model,
+                provider=cfg.provider,
+                ollama_url=cfg.ollama_url,
+                google_api_key=cfg.google_api_key,
             )
 
             if not response_text:
                 return {
-                    "error": "Ollama returned an empty response",
+                    "error": "LLM provider returned an empty response",
                     "url": url,
                     "title": page_title,
                 }
@@ -139,7 +142,7 @@ Content:
             parsed = extract_json(response_text)
             if not isinstance(parsed, dict):
                 return {
-                    "error": "Ollama response was not a JSON object",
+                    "error": "LLM provider response was not a JSON object",
                     "url": url,
                     "title": page_title,
                 }

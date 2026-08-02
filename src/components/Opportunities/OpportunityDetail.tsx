@@ -60,6 +60,9 @@ interface Props {
   onBack: () => void;
   onRefresh: () => void;
   settings: {
+    provider: 'google' | 'ollama';
+    googleApiKey: string;
+    googleModel: string;
     ollamaModel: string;
     ollamaUrl: string;
   };
@@ -73,6 +76,10 @@ export function OpportunityDetail({
   settings,
   onViewDrafts,
 }: Props) {
+  // Resolve the active provider model/key for direct LLM commands
+  const activeProvider = settings.provider === 'ollama' ? 'ollama' : 'google';
+  const activeModel = activeProvider === 'ollama' ? settings.ollamaModel : settings.googleModel;
+  const activeApiKey = activeProvider === 'ollama' ? null : settings.googleApiKey;
   const [opp, setOpp] = useState<Opportunity | null>(null);
   const [loading, setLoading] = useState(true);
   const [kbItems, setKbItems] = useState<KnowledgeItem[]>([]);
@@ -183,11 +190,13 @@ export function OpportunityDetail({
           fileBytes: Array.from(bytes),
         });
 
-        // 2. Invoke local vision model via Ollama to generate a markdown description
+        // 2. Invoke vision model via the active provider to generate a markdown description
         const description = await invoke<string>('generate_vision_description', {
           imageBytes: Array.from(bytes),
-          model: settings.ollamaModel,
+          model: activeModel,
           url: settings.ollamaUrl,
+          provider: activeProvider,
+          apiKey: activeApiKey,
         });
 
         await invoke('update_attachment_text', {
@@ -252,6 +261,11 @@ export function OpportunityDetail({
                 await invoke('ingest_document', {
                   documentId: `${opportunityId}_${newest.id}`,
                   content: newest.extracted_text,
+                  provider: activeProvider,
+                  googleApiKey: activeProvider === 'ollama' ? null : settings.googleApiKey,
+                  googleModel: settings.googleModel,
+                  ollamaUrl: settings.ollamaUrl,
+                  ollamaModel: settings.ollamaModel,
                 });
               }
             } catch (err) {
@@ -417,8 +431,10 @@ Return only the JSON output within the code block.`;
 
       const response = await invoke<string>('generate_chat_response', {
         prompt: fullPrompt,
-        model: settings.ollamaModel,
+        model: activeModel,
         url: settings.ollamaUrl,
+        provider: activeProvider,
+        apiKey: activeApiKey,
       });
 
       // Parse JSON from response
@@ -556,8 +572,10 @@ Return only the JSON output within the code block.`;
 
       const response = await invoke<string>('generate_chat_response', {
         prompt: fullPrompt,
-        model: settings.ollamaModel,
+        model: activeModel,
         url: settings.ollamaUrl,
+        provider: activeProvider,
+        apiKey: activeApiKey,
       });
 
       setDraftContent(response);

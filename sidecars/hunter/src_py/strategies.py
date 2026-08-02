@@ -22,11 +22,8 @@ from sidecars.hunter.src_py.utils.search_detector import detect_search_input
 from sidecars.hunter.src_py.adapters import resolve_adapter
 from sidecars.hunter.src_py.models import PortalConfig, RFPOpportunity, OllamaExtraction
 from sidecars.hunter.src_py.progress_reporter import ProgressReporter
-from sidecars.hunter.src_py.ollama_utils import (
-    extract_json,
-    fetch_ollama_tags_sync,
-    fetch_ollama_generate_sync,
-)
+from sidecars.hunter.src_py.ollama_utils import extract_json
+from sidecars.shared.llm_client import generate, list_models
 
 logger = logging.getLogger("hunter.strategies")
 
@@ -524,20 +521,28 @@ class GenericSearchStrategy(ScrapingStrategy):
                                         }"""
                                         )
 
-                                        ollama_url = (
-                                            config.ollama_url
-                                            or os.environ.get(
-                                                "OLLAMA_URL",
-                                                "http://127.0.0.1:11434",
-                                            )
-                                        )
+                                        provider_cfg = {
+                                            "provider": getattr(config, "provider", None),
+                                            "google_api_key": getattr(config, "google_api_key", None),
+                                            "google_model": getattr(config, "google_model", None),
+                                            "ollama_url": (
+                                                config.ollama_url
+                                                or os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+                                            ),
+                                            "ollama_model": config.ollama_model,
+                                        }
 
-                                        target_model = config.ollama_model
+                                        target_model = (
+                                            config.google_model
+                                            if (getattr(config, "provider", None) or os.environ.get("LLM_PROVIDER", "google")) == "google"
+                                            else config.ollama_model
+                                        )
                                         if not target_model:
                                             try:
-                                                avail = await asyncio.to_thread(
-                                                    fetch_ollama_tags_sync,
-                                                    ollama_url,
+                                                avail = await list_models(
+                                                    provider=provider_cfg["provider"],
+                                                    ollama_url=provider_cfg["ollama_url"],
+                                                    google_api_key=provider_cfg["google_api_key"],
                                                 )
                                                 preferred = [
                                                     "gemma3",
@@ -565,23 +570,19 @@ class GenericSearchStrategy(ScrapingStrategy):
                                                 target_model = "gemma:2b"
 
                                         prompt = f"Extract ONLY the full job description text from the following HTML. Output nothing but the pure description text.\n\n{cleaned_deep_html[:50000]}"
-                                        payload = {
-                                            "model": target_model,
-                                            "prompt": prompt,
-                                            "stream": False,
-                                            "options": {"temperature": 0.1},
-                                        }
                                         try:
-                                            response_text = await asyncio.to_thread(
-                                                fetch_ollama_generate_sync,
-                                                ollama_url,
-                                                payload,
+                                            response_text = await generate(
+                                                prompt,
+                                                model=target_model,
+                                                provider=provider_cfg["provider"],
+                                                ollama_url=provider_cfg["ollama_url"],
+                                                google_api_key=provider_cfg["google_api_key"],
                                             )
                                             if response_text:
                                                 full_desc = response_text
                                         except Exception as e:
                                             logger.warning(
-                                                f"Ollama deep crawl fallback failed: {e}"
+                                                f"LLM deep crawl fallback failed: {e}"
                                             )
 
                                     opp.description = full_desc.strip()[:50000]
@@ -732,21 +733,17 @@ Content:
             success = False
 
             try:
-                payload = {
-                    "model": target_model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": 0.1},
-                }
-
-                response_text = await asyncio.to_thread(
-                    fetch_ollama_generate_sync, ollama_url, payload
+                response_text = await generate(
+                    prompt,
+                    model=target_model,
+                    provider=provider_cfg["provider"],
+                    ollama_url=provider_cfg["ollama_url"],
+                    google_api_key=provider_cfg["google_api_key"],
                 )
 
                 if response_text:
                     await reporter.report_progress(
-                        f"[{keyword}] Ollama responded ({len(response_text)} chars) from {source_label}"
+                        f"[{keyword}] LLM provider responded ({len(response_text)} chars) from {source_label}"
                     )
 
                     is_refusal = (
@@ -764,17 +761,17 @@ Content:
                             success = True
                         except json.JSONDecodeError as decode_err:
                             logger.warning(
-                                f"[{keyword}] Ollama response was not valid JSON: {response_text[:200]}, error: {str(decode_err)}"
+                                f"[{keyword}] LLM response was not valid JSON: {response_text[:200]}, error: {str(decode_err)}"
                             )
                             await reporter.report_progress(
-                                f"[{keyword}] Ollama response was not valid JSON: {str(decode_err)}"
+                                f"[{keyword}] LLM response was not valid JSON: {str(decode_err)}"
                             )
                     else:
                         await reporter.report_progress(
-                            f"[{keyword}] Ollama refused to extract from {source_label}"
+                            f"[{keyword}] LLM refused to extract from {source_label}"
                         )
                 else:
-                    logger.warning(f"[{keyword}] Ollama returned empty response")
+                    logger.warning(f"[{keyword}] LLM returned empty response")
                     await reporter.report_progress(
                         f"[{keyword}] Ollama returned empty response"
                     )
@@ -827,87 +824,103 @@ Content:
             return opportunities
 
         await reporter.report_progress(
-            f"[{keyword}] Initiating local Ollama extraction..."
+            f"[{keyword}] Initiating LLM extraction..."
         )
 
-        ollama_url = config.ollama_url or os.environ.get(
-            "OLLAMA_URL", "http://localhost:11434"
-        )
+        provider_cfg = {
+            "provider": getattr(config, "provider", None) or os.environ.get("LLM_PROVIDER", "google"),
+            "google_api_key": getattr(config, "google_api_key", None) or os.environ.get("GOOGLE_API_KEY", ""),
+            "google_model": getattr(config, "google_model", None) or os.environ.get("GOOGLE_LLM_MODEL", "gemini-2.5-flash"),
+            "ollama_url": config.ollama_url or os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+            "ollama_model": config.ollama_model or os.environ.get("OLLAMA_MODEL", ""),
+        }
 
-        if os.environ.get("RUNNING_IN_DOCKER") == "true":
-            parsed_ollama = urlparse(ollama_url)
-            if parsed_ollama.hostname in ("localhost", "127.0.0.1", "host.docker.internal"):
-                use_resolved = False
-                if parsed_ollama.hostname == "host.docker.internal":
-                    try:
-                        import socket
-
-                        socket.gethostbyname("host.docker.internal")
-                        use_resolved = True
-                    except Exception:
-                        pass
-
-                if not use_resolved:
-                    gateway_ip = "172.19.0.1"
-                    try:
-                        with open("/proc/net/route") as f:
-                            for line in f:
-                                fields = line.strip().split()
-                                if len(fields) >= 3 and fields[1] == "00000000":
-                                    val = fields[2]
-                                    ip_parts = [
-                                        str(int(val[i : i + 2], 16))
-                                        for i in range(6, -1, -2)
-                                    ]
-                                    gateway_ip = ".".join(ip_parts)
-                                    break
-                    except Exception:
-                        pass
-
-                    netloc = (
-                        f"{gateway_ip}:{parsed_ollama.port}"
-                        if parsed_ollama.port
-                        else gateway_ip
-                    )
-                    ollama_url = parsed_ollama._replace(netloc=netloc).geturl()
-
-        available_models = await asyncio.to_thread(fetch_ollama_tags_sync, ollama_url)
-
-        if not available_models:
-            await reporter.report_progress(
-                f"[{keyword}] Warning: Ollama server at {ollama_url} has no models installed "
-                "or is unreachable. Please pull an LLM model (e.g. gemma or qwen2.5-coder) inside Settings."
-            )
-            return []
-
-        target_model = config.ollama_model
-
-        if not target_model and config.selector_config:
-            try:
-                sel_data = json.loads(config.selector_config)
-                if sel_data.get("modelName"):
-                    target_model = sel_data["modelName"]
-            except Exception:
-                pass
-
-        if not target_model:
-            target_model = os.environ.get("OLLAMA_MODEL")
-
-        if not target_model or target_model not in available_models:
-            preferred = ["gemma3", "gemma4", "gemma", "qwen3", "qwen2.5-coder", "llama3"]
-            for pref in preferred:
-                match = next(
-                    (m for m in available_models if pref in m.lower()), None
+        if provider_cfg["provider"] == "google":
+            if not provider_cfg["google_api_key"]:
+                await reporter.report_error(
+                    f"[{keyword}] Google provider selected but no API key is configured."
                 )
-                if match:
-                    target_model = match
-                    break
+                return []
+            available_models = []
+            target_model = provider_cfg["google_model"]
+        else:
+            ollama_url = provider_cfg["ollama_url"]
+
+            if os.environ.get("RUNNING_IN_DOCKER") == "true":
+                parsed_ollama = urlparse(ollama_url)
+                if parsed_ollama.hostname in ("localhost", "127.0.0.1", "host.docker.internal"):
+                    use_resolved = False
+                    if parsed_ollama.hostname == "host.docker.internal":
+                        try:
+                            import socket
+
+                            socket.gethostbyname("host.docker.internal")
+                            use_resolved = True
+                        except Exception:
+                            pass
+
+                    if not use_resolved:
+                        gateway_ip = "172.19.0.1"
+                        try:
+                            with open("/proc/net/route") as f:
+                                for line in f:
+                                    fields = line.strip().split()
+                                    if len(fields) >= 3 and fields[1] == "00000000":
+                                        val = fields[2]
+                                        ip_parts = [
+                                            str(int(val[i : i + 2], 16))
+                                            for i in range(6, -1, -2)
+                                        ]
+                                        gateway_ip = ".".join(ip_parts)
+                                        break
+                        except Exception:
+                            pass
+
+                        netloc = (
+                            f"{gateway_ip}:{parsed_ollama.port}"
+                            if parsed_ollama.port
+                            else gateway_ip
+                        )
+                        ollama_url = parsed_ollama._replace(netloc=netloc).geturl()
+                        provider_cfg["ollama_url"] = ollama_url
+
+            available_models = await list_models(
+                provider="ollama",
+                ollama_url=ollama_url,
+            )
+
+            if not available_models:
+                await reporter.report_progress(
+                    f"[{keyword}] Warning: Ollama server at {ollama_url} has no models installed "
+                    "or is unreachable. Please pull an LLM model (e.g. gemma or qwen2.5-coder) inside Settings."
+                )
+                return []
+
+            target_model = provider_cfg["ollama_model"]
+
+            if not target_model and config.selector_config:
+                try:
+                    sel_data = json.loads(config.selector_config)
+                    if sel_data.get("modelName"):
+                        target_model = sel_data["modelName"]
+                except Exception:
+                    pass
 
             if not target_model or target_model not in available_models:
-                target_model = available_models[0]
+                preferred = ["gemma3", "gemma4", "gemma", "qwen3", "qwen2.5-coder", "llama3"]
+                for pref in preferred:
+                    match = next(
+                        (m for m in available_models if pref in m.lower()), None
+                    )
+                    if match:
+                        target_model = match
+                        break
+
+                if not target_model or target_model not in available_models:
+                    target_model = available_models[0]
 
         await reporter.report_progress(
-            f"[{keyword}] Selected dynamic Ollama model: {target_model}"
+            f"[{keyword}] Selected dynamic LLM model: {target_model}"
         )
 
         # Try HTML extraction first, then fall back to plain text

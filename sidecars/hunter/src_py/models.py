@@ -20,6 +20,9 @@ class PortalConfig(BaseModel):
     selector_config: Optional[str] = Field(default=None, alias="selectorConfig")
     ollama_url: Optional[str] = Field(default=None, alias="ollamaUrl")
     ollama_model: Optional[str] = Field(default=None, alias="ollamaModel")
+    provider: Optional[str] = Field(default=None, alias="provider")
+    google_api_key: Optional[str] = Field(default=None, alias="googleApiKey")
+    google_model: Optional[str] = Field(default=None, alias="googleModel")
 
     model_config = ConfigDict(populate_by_name=True)
 

@@ -14,41 +14,108 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 async fn check_ollama_status(url: String) -> String {
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(1))
-        .build() {
+    check_llm_provider(Some("ollama".to_string()), url, None::<String>, None::<String>).await
+}
+
+#[tauri::command]
+async fn check_llm_provider(
+    provider: Option<String>,
+    ollama_url: String,
+    google_api_key: Option<String>,
+    _google_model: Option<String>,
+) -> String {
+    let is_google = provider.as_deref().unwrap_or("google") == "google";
+    if is_google {
+        // Google: verify API key by listing models
+        let key = google_api_key.unwrap_or_default();
+        if key.is_empty() {
+            return "Not Configured".to_string();
+        }
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        {
             Ok(c) => c,
             Err(_) => return "Offline".to_string(),
         };
-
-    match client.get(&format!("{}/api/tags", url)).send().await {
-        Ok(res) if res.status().is_success() => "Online".to_string(),
-        _ => "Offline".to_string(),
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+            key
+        );
+        match client.get(&url).send().await {
+            Ok(res) if res.status().is_success() => "Online".to_string(),
+            _ => "Offline".to_string(),
+        }
+    } else {
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return "Offline".to_string(),
+        };
+        match client.get(&format!("{}/api/tags", ollama_url)).send().await {
+            Ok(res) if res.status().is_success() => "Online".to_string(),
+            _ => "Offline".to_string(),
+        }
     }
 }
 
 #[tauri::command]
-async fn generate_chat_response(prompt: String, model: String, url: String) -> Result<String, String> {
+async fn generate_chat_response(
+    prompt: String,
+    model: String,
+    url: String,
+    provider: Option<String>,
+    api_key: Option<String>,
+) -> Result<String, String> {
     let client = reqwest::Client::new();
-    let res = client.post(&format!("{}/api/generate", url))
-        .json(&serde_json::json!({
-            "model": model,
-            "prompt": prompt,
-            "stream": false
-        }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-    
-    if let Some(response) = json.get("response") {
-        if let Some(text) = response.as_str() {
+    if provider.as_deref().unwrap_or("google") == "google" {
+        let key = api_key.unwrap_or_default();
+        let res = client
+            .post(&format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, key
+            ))
+            .json(&serde_json::json!({
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.1}
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+        if let Some(text) = json
+            .get("candidates")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("content"))
+            .and_then(|c| c.get("parts"))
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("text"))
+            .and_then(|t| t.as_str())
+        {
             return Ok(text.to_string());
         }
+        Err("Failed to get response from Google Gemini".to_string())
+    } else {
+        let res = client
+            .post(&format!("{}/api/generate", url))
+            .json(&serde_json::json!({
+                "model": model,
+                "prompt": prompt,
+                "stream": false
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+        if let Some(response) = json.get("response") {
+            if let Some(text) = response.as_str() {
+                return Ok(text.to_string());
+            }
+        }
+        Err("Failed to get response from Ollama".to_string())
     }
-    
-    Err("Failed to get response from Ollama".to_string())
 }
 
 #[tauri::command]
@@ -56,34 +123,68 @@ async fn generate_vision_description(
     image_bytes: Vec<u8>,
     model: String,
     url: String,
+    provider: Option<String>,
+    api_key: Option<String>,
 ) -> Result<String, String> {
     use base64::{Engine as _, engine::general_purpose};
 
     let base64_image = general_purpose::STANDARD.encode(image_bytes);
-    
     let client = reqwest::Client::new();
     let prompt = "Analyze this technical diagram. Provide a detailed structured description including: 1. Core components/nodes, 2. The connections, arrows, or relationships between them, 3. The directional sequence or flow of data.";
 
-    let res = client.post(&format!("{}/api/generate", url))
-        .json(&serde_json::json!({
-            "model": model,
-            "prompt": prompt,
-            "images": vec![base64_image],
-            "stream": false
-        }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-    
-    if let Some(response) = json.get("response") {
-        if let Some(text) = response.as_str() {
+    if provider.as_deref().unwrap_or("google") == "google" {
+        let key = api_key.unwrap_or_default();
+        let res = client
+            .post(&format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, key
+            ))
+            .json(&serde_json::json!({
+                "contents": [{
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                        {"inline_data": {"mime_type": "image/png", "data": base64_image}}
+                    ]
+                }],
+                "generationConfig": {"temperature": 0.1}
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+        if let Some(text) = json
+            .get("candidates")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("content"))
+            .and_then(|c| c.get("parts"))
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("text"))
+            .and_then(|t| t.as_str())
+        {
             return Ok(text.to_string());
         }
+        Err("Failed to get visual description from Google Gemini".to_string())
+    } else {
+        let res = client
+            .post(&format!("{}/api/generate", url))
+            .json(&serde_json::json!({
+                "model": model,
+                "prompt": prompt,
+                "images": vec![base64_image],
+                "stream": false
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+        if let Some(response) = json.get("response") {
+            if let Some(text) = response.as_str() {
+                return Ok(text.to_string());
+            }
+        }
+        Err("Failed to get visual description from local Ollama model".to_string())
     }
-    
-    Err("Failed to get visual description from local Ollama model".to_string())
 }
 
 #[tauri::command]
@@ -94,33 +195,71 @@ async fn extract_pdf_text_from_bytes(bytes: Vec<u8>) -> Result<String, String> {
 
 #[tauri::command]
 async fn get_ollama_models(url: String) -> Result<Vec<String>, String> {
+    get_llm_models(Some("ollama".to_string()), url, None::<String>).await
+}
+
+#[tauri::command]
+async fn get_llm_models(
+    provider: Option<String>,
+    ollama_url: String,
+    google_api_key: Option<String>,
+) -> Result<Vec<String>, String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(5))
         .build()
         .map_err(|e| e.to_string())?;
 
-    let res = client.get(&format!("{}/api/tags", url))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-    
-    let mut models = Vec::new();
-    if let Some(models_array) = json.get("models") {
-        if let Some(arr) = models_array.as_array() {
-            for item in arr {
-                if let Some(name) = item.get("name") {
-                    if let Some(name_str) = name.as_str() {
-                        models.push(name_str.to_string());
+    if provider.as_deref().unwrap_or("google") == "google" {
+        let key = google_api_key.unwrap_or_default();
+        if key.is_empty() {
+            return Ok(vec![]);
+        }
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+            key
+        );
+        let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+        let mut models = Vec::new();
+        if let Some(models_array) = json.get("models") {
+            if let Some(arr) = models_array.as_array() {
+                for item in arr {
+                    if let Some(name) = item.get("name") {
+                        if let Some(name_str) = name.as_str() {
+                            let clean = name_str.strip_prefix("models/").unwrap_or(name_str);
+                            let methods = item.get("supportedGenerationMethods").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+                            if methods.iter().any(|m| m.as_str().map(|s| s.contains("generateContent")).unwrap_or(false)) {
+                                models.push(clean.to_string());
+                            }
+                        }
                     }
                 }
             }
         }
+        models.sort();
+        Ok(models)
+    } else {
+        let res = client
+            .get(&format!("{}/api/tags", ollama_url))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let json: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+        let mut models = Vec::new();
+        if let Some(models_array) = json.get("models") {
+            if let Some(arr) = models_array.as_array() {
+                for item in arr {
+                    if let Some(name) = item.get("name") {
+                        if let Some(name_str) = name.as_str() {
+                            models.push(name_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        models.sort();
+        Ok(models)
     }
-    
-    models.sort();
-    Ok(models)
 }
 
 #[tauri::command]
@@ -129,6 +268,9 @@ async fn analyze_gaps(
     rfp_id: String,
     ollama_url: String,
     ollama_model: String,
+    provider: Option<String>,
+    api_key: Option<String>,
+    google_model: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     if uuid::Uuid::parse_str(&rfp_id).is_err() {
         return Err("Invalid rfp_id format. Must be a valid UUID.".to_string());
@@ -139,6 +281,9 @@ async fn analyze_gaps(
         "rfp_id": rfp_id,
         "ollama_url": ollama_url,
         "ollama_model": ollama_model,
+        "provider": provider,
+        "google_api_key": api_key,
+        "google_model": google_model,
     });
     
     let response = crate::sidecar::execute_jsonrpc_method_await(
@@ -211,22 +356,15 @@ async fn bootstrap_system(app: tauri::AppHandle) -> Result<String, String> {
     let poll_timeout = Duration::from_secs(2);
     let mut logs = vec![String::from("Sentinel Bootstrapped Natively in Rust:")];
 
-    // Wait for Ollama
+    // Quick non-fatal Ollama detection (the app falls back to Google Gemini if absent)
     let ollama_port = std::env::var("OLLAMA_PORT").unwrap_or_else(|_| "11434".to_string());
     let ollama_addr_str = format!("127.0.0.1:{}", ollama_port);
     let ollama_addr = ollama_addr_str.parse().unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap());
-    let mut ollama_ok = false;
-    for _ in 0..15 {
-        if TcpStream::connect_timeout(&ollama_addr, poll_timeout).is_ok() {
-            ollama_ok = true;
-            break;
-        }
-        sleep(Duration::from_secs(1));
-    }
+    let ollama_ok = TcpStream::connect_timeout(&ollama_addr, poll_timeout).is_ok();
     if ollama_ok {
         logs.push(String::from("[✓] Ollama is ONLINE"));
     } else {
-        logs.push(String::from("[-] Ollama check timed out"));
+        logs.push(String::from("[i] Ollama not detected — will use Google Gemini (cloud) if configured"));
     }
 
     // Wait for ChromaDB
@@ -293,7 +431,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             check_ollama_status,
+            check_llm_provider,
             get_ollama_models,
+            get_llm_models,
             generate_chat_response,
             generate_vision_description,
             extract_pdf_text_from_bytes,

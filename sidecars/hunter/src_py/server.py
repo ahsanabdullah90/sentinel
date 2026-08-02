@@ -68,7 +68,14 @@ async def handle_detect(params: dict, req_id: str):
 
     logger.info(f"JSON-RPC Detect request received for URL: {url}")
     try:
-        report = await analyze_portal(url)
+        provider_config = {
+            "provider": params.get("provider"),
+            "google_api_key": params.get("google_api_key"),
+            "google_model": params.get("google_model"),
+            "ollama_url": params.get("ollama_url"),
+            "ollama_model": params.get("ollama_model"),
+        }
+        report = await analyze_portal(url, provider_config)
         await _emit_ipc({
             "event": "portal_detected",
             "json_payload": json.dumps(report),
@@ -99,7 +106,14 @@ async def handle_extract_opportunity(params: dict, req_id: str):
 
     logger.info(f"JSON-RPC ExtractOpportunity request received for URL: {url}")
     try:
-        result = await extract_single_opportunity(url)
+        provider_config = {
+            "provider": params.get("provider"),
+            "google_api_key": params.get("google_api_key"),
+            "google_model": params.get("google_model"),
+            "ollama_url": params.get("ollama_url"),
+            "ollama_model": params.get("ollama_model"),
+        }
+        result = await extract_single_opportunity(url, provider_config)
         await _emit_ipc({
             "event": "extract_opportunity_result",
             "json_payload": json.dumps(result),

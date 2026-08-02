@@ -49,30 +49,14 @@ if not exist "node_modules" (
     )
 )
 
-:: Check Ollama
+:: Check Ollama (optional - the app can use Google Gemini cloud instead)
 netstat -ano | findstr :11434 >nul
 if %errorlevel% neq 0 (
-    echo [^^!] Ollama is not running on port 11434.
-    echo [i] Attempting to start Ollama background service...
-    start "" /B ollama serve
-
-    set /a count=0
-    :poll_ollama
-    timeout /t 1 /nobreak >nul
-    netstat -ano | findstr :11434 >nul
-    if %errorlevel% neq 0 (
-        set /a count+=1
-        if !count! lss 10 (
-            goto :poll_ollama
-        ) else (
-            echo [WARNING] Ollama did not start within 10 seconds.
-            echo [^^!] Please install and start Ollama manually.
-        )
-    ) else (
-        echo [OK] Ollama service started successfully.
-    )
+    echo [i] Ollama not detected on port 11434.
+    echo [i] The app will use Google Gemini (cloud) unless Ollama is started.
+    echo [i] Tip: run "ollama serve" to enable the local provider.
 ) else (
-    echo [OK] Ollama service is online.
+    echo [OK] Ollama service detected on port 11434.
 )
 
 :: Check Python sidecar dependencies

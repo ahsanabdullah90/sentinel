@@ -7,23 +7,30 @@ to inspect a portal URL and detect search capability.
 import os
 import json
 import logging
-import urllib.request
 from playwright.async_api import async_playwright
 
+from sidecars.shared.llm_client import generate, list_models
 from sidecars.hunter.src_py.ollama_utils import extract_json
 from sidecars.hunter.src_py.utils.search_detector import detect_search_input
 
 logger = logging.getLogger("hunter.portal_analyzer")
 
-async def analyze_portal(url: str) -> dict:
+async def analyze_portal(url: str, provider_config: dict = None) -> dict:
     """Analyze a target portal URL to detect capabilities and search fields.
 
-    Uses a local Ollama model if available, falling back to clean heuristics.
+    Uses the configured LLM provider (Google Gemini or Ollama) if available,
+    falling back to clean heuristics.
     """
+    cfg = provider_config or {}
+    provider = (cfg.get("provider") or os.environ.get("LLM_PROVIDER", "google")).lower()
+    google_api_key = cfg.get("google_api_key") or os.environ.get("GOOGLE_API_KEY", "")
+    google_model = cfg.get("google_model") or os.environ.get("GOOGLE_LLM_MODEL", "gemini-2.5-flash")
+    ollama_url = (cfg.get("ollama_url") or os.environ.get("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+
     print(json.dumps({
         "event": "progress",
         "portalId": "detector",
-        "message": f"Analyzing {url} with local Ollama model..."
+        "message": f"Analyzing {url} with {provider} model..."
     }), flush=True)
 
     async with async_playwright() as p:
@@ -43,29 +50,30 @@ async def analyze_portal(url: str) -> dict:
                 return clone.innerHTML.substring(0, 50000);
             }""")
 
-            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-
-            # 1. Fetch available models from local Ollama
+            # Determine availability + target model per provider
             available_models = []
-            try:
-                req = urllib.request.Request(f"{ollama_url}/api/tags")
-                with urllib.request.urlopen(req, timeout=3.0) as response:
-                    if response.status == 200:
-                        data = json.loads(response.read().decode("utf-8"))
-                        available_models = [m["name"] for m in data.get("models", [])]
-            except Exception as e:
-                logger.error(f"Failed to query Ollama models at {ollama_url}: {str(e)}")
+            target_model = google_model if provider == "google" else cfg.get("ollama_model") or os.environ.get("OLLAMA_MODEL", "")
+            can_query = True
 
-            # If Ollama has models, attempt smart selector extraction
-            if available_models:
-                target_model = os.environ.get("OLLAMA_MODEL")
-                if not target_model or target_model not in available_models:
+            if provider == "google":
+                if not google_api_key:
+                    can_query = False
+            else:
+                try:
+                    available_models = await list_models(provider="ollama", ollama_url=ollama_url)
+                except Exception as e:
+                    logger.error(f"Failed to query Ollama models at {ollama_url}: {str(e)}")
+                if not available_models:
+                    can_query = False
+
+            if can_query:
+                if not target_model and available_models:
                     target_model = available_models[0]
 
                 print(json.dumps({
                     "event": "progress",
                     "portalId": "detector",
-                    "message": f"Calling local Ollama ({target_model}) for intelligent search selector detection..."
+                    "message": f"Calling {provider} ({target_model}) for intelligent search selector detection..."
                 }), flush=True)
 
                 prompt = f"""
@@ -80,34 +88,24 @@ async def analyze_portal(url: str) -> dict:
                 """
 
                 try:
-                    payload = {
-                        "model": target_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "format": "json",
-                        "options": {
-                            "temperature": 0.1
-                        }
-                    }
-                    req = urllib.request.Request(
-                        f"{ollama_url}/api/generate",
-                        data=json.dumps(payload).encode("utf-8"),
-                        headers={"Content-Type": "application/json"}
+                    response_text = await generate(
+                        prompt,
+                        model=target_model,
+                        provider=provider,
+                        ollama_url=ollama_url,
+                        google_api_key=google_api_key,
                     )
-                    with urllib.request.urlopen(req, timeout=30.0) as response:
-                        if response.status == 200:
-                            resp_data = json.loads(response.read().decode("utf-8"))
-                            response_text = resp_data.get("response", "").strip()
-                            parsed = extract_json(response_text)
-                            if parsed and isinstance(parsed, dict) and parsed.get("searchSelector"):
-                                search_selector = parsed["searchSelector"]
+                    if response_text:
+                        parsed = extract_json(response_text)
+                        if parsed and isinstance(parsed, dict) and parsed.get("searchSelector"):
+                            search_selector = parsed["searchSelector"]
                 except Exception as model_err:
-                    logger.error(f"Local Ollama analysis error: {str(model_err)}")
+                    logger.error(f"{provider} analysis error: {str(model_err)}")
             else:
                 print(json.dumps({
                     "event": "progress",
                     "portalId": "detector",
-                    "message": "Local Ollama has no models or is offline, falling back to heuristics..."
+                    "message": f"{provider} provider has no models / is offline, falling back to heuristics..."
                 }), flush=True)
 
             # Heuristics fallback

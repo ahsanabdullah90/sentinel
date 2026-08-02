@@ -26,14 +26,20 @@ export interface KnowledgeItem {
 
 export interface KnowledgeBaseProps {
   settings?: {
+    provider: 'google' | 'ollama';
+    googleApiKey: string;
+    googleModel: string;
     ollamaModel: string;
     ollamaUrl: string;
   };
 }
 
 export function KnowledgeBaseDashboard({ settings }: KnowledgeBaseProps) {
+  const provider = settings?.provider || 'google';
   const ollamaModel = settings?.ollamaModel || 'phi3';
   const ollamaUrl = settings?.ollamaUrl || 'http://127.0.0.1:11434';
+  const visionModel = provider === 'ollama' ? ollamaModel : (settings?.googleModel || 'gemini-2.5-flash');
+  const googleApiKey = settings?.googleApiKey || '';
 
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,11 +77,13 @@ export function KnowledgeBaseDashboard({ settings }: KnowledgeBaseProps) {
         const bytes = new Uint8Array(arrayBuffer);
         setAttachedFileBytes(bytes);
 
-        // Invoke local vision model to describe the diagram or image
+        // Invoke vision model via the active provider to describe the diagram or image
         const description = await invoke<string>('generate_vision_description', {
           imageBytes: Array.from(bytes),
-          model: ollamaModel,
+          model: visionModel,
           url: ollamaUrl,
+          provider,
+          apiKey: provider === 'ollama' ? null : googleApiKey,
         });
         setNewContent(description);
       } catch (err) {

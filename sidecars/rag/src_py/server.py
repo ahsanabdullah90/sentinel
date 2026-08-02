@@ -12,7 +12,6 @@ import tempfile
 import traceback
 
 from sidecars.rag.src_py.ingest import ingest_document
-from sidecars.rag.src_py.ollama_client import OllamaClient
 from sidecars.rag.src_py.chroma_client import ChromaClient
 from sidecars.rag.src_py.events import (
     _emit_ipc,
@@ -20,6 +19,7 @@ from sidecars.rag.src_py.events import (
     emit_result,
     emit_error_response,
 )
+from sidecars.shared.llm_client import generate, list_models, LLMConfig
 
 # ---------------------------------------------------------------------------
 # IPC Hijack & Safety Redirection
@@ -75,7 +75,7 @@ async def handle_ingest(params: dict, req_id: str):
             f.write(content)
             temp_file_path = f.name
 
-        await ingest_document(document_id, temp_file_path)
+        await ingest_document(document_id, temp_file_path, google_api_key=params.get("google_api_key") or "")
         emit_result({"status": "ok"}, req_id)
     except Exception as e:
         logger.error(f"Error in JSON-RPC Ingest: {str(e)}")
@@ -97,22 +97,29 @@ async def handle_query(params: dict, req_id: str):
     logger.info(f"JSON-RPC Query request received: {query}")
 
     try:
-        result = await _execute_query(query)
+        provider_config = {
+            "provider": params.get("provider"),
+            "google_api_key": params.get("google_api_key"),
+            "google_model": params.get("google_model"),
+            "ollama_url": params.get("ollama_url"),
+            "ollama_model": params.get("ollama_model"),
+        }
+        result = await _execute_query(query, provider_config)
         emit_result(result, req_id)
     except Exception as e:
         logger.error(f"Error in JSON-RPC Query: {str(e)}")
         emit_error_response(str(e), req_id)
 
 
-async def _execute_query(query: str) -> dict:
+async def _execute_query(query: str, provider_config: dict = None) -> dict:
     """Execute a full RAG query pipeline.
 
     Steps:
         1. Query ChromaDB for relevant context from all RFP collections.
-        2. Select the best available Ollama model.
+        2. Select the best available model for the active provider.
         3. Generate an answer using the retrieved context.
     """
-    ollama = OllamaClient()
+    cfg = LLMConfig(**(provider_config or {}))
     chroma = ChromaClient()
 
     context_text = "No specific context available."
@@ -131,18 +138,32 @@ async def _execute_query(query: str) -> dict:
         f"Context: {context_text}\nQuery: {query}"
     )
 
-    pulled_models = await ollama.get_pulled_models()
-    if not pulled_models:
-        raise RuntimeError("No pulled models found in Ollama.")
-
-    selected_model = _pick_best_model(pulled_models)
-
-    logger.info(f"Generating Ollama answer using model: {selected_model}")
-    answer = await ollama.generate(
-        model=selected_model,
-        prompt=prompt,
-        system_context="You are an expert proposal assistant.",
-    )
+    if cfg.is_google:
+        selected_model = cfg.google_model or "gemini-2.5-flash"
+        logger.info(f"Generating Gemini answer using model: {selected_model}")
+        answer = await generate(
+            prompt,
+            model=selected_model,
+            provider="google",
+            google_api_key=cfg.google_api_key,
+            system="You are an expert proposal assistant.",
+        )
+    else:
+        available_models = await list_models(
+            provider="ollama",
+            ollama_url=cfg.ollama_url,
+        )
+        if not available_models:
+            raise RuntimeError("No pulled models found in Ollama.")
+        selected_model = cfg.ollama_model or _pick_best_model(available_models)
+        logger.info(f"Generating Ollama answer using model: {selected_model}")
+        answer = await generate(
+            prompt,
+            model=selected_model,
+            provider="ollama",
+            ollama_url=cfg.ollama_url,
+            system="You are an expert proposal assistant.",
+        )
 
     if not source_docs_list:
         source_docs_list = [{"id": "empty", "score": 1.0}]

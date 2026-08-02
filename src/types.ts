@@ -1,3 +1,11 @@
+export interface AppSettings {
+  provider: 'google' | 'ollama';
+  googleApiKey: string;
+  googleModel: string;
+  ollamaModel: string;
+  ollamaUrl: string;
+}
+
 export interface Portal {
   id: string;
   name: string;

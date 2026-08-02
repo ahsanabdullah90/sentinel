@@ -5,6 +5,23 @@ All notable changes to the Sentinel project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-02
+
+### Added
+
+- **Cloud-First AI Provider (Google Gemini)**: All LLM calls can now run on Google AI Studio / Gemini (`gemini-2.5-flash` default) instead of requiring a local Ollama setup. A new shared LLM client (`sidecars/shared/llm_client.py`) centralizes generation, model listing, and health checks across the hunter, RAG, and gap-engine sidecars.
+- **Provider Switch in Settings**: The Settings modal now has a provider toggle — **Google Gemini** (API key + model list) or **Ollama (Local)** (URL + model). Settings are persisted in `localStorage`.
+- **Automatic Provider Detection on Boot**: On startup the app probes Ollama. If online, it defaults to Ollama; otherwise it falls back to Google and, if no API key is saved, prompts the user to connect a provider in Settings.
+- **Provider Gating**: Hunt sessions, add-from-link, drafting, gap analysis, and vision analysis are blocked (with a prompt to open Settings) until a provider is configured and healthy.
+- **Google Embeddings for RAG**: When the provider is Google, ChromaDB uses `text-embedding-004` via a custom embedding function, making the vector store fully cloud-based. Local Ollama/ONNX embeddings remain for the Ollama path.
+- **Provider-Aware Rust Commands**: `check_llm_provider`, `get_llm_models`, `generate_chat_response`, `generate_vision_description`, and `analyze_gaps` accept provider config and branch between Gemini and Ollama.
+- **Softened Launcher**: `run.bat` no longer hard-requires or auto-starts Ollama; it prints a soft detection note and proceeds. `bootstrap_system` uses a quick non-fatal Ollama probe instead of a blocking 15s wait.
+
+### Changed
+
+- All three sidecars (hunter, rag, gap_engine) now import the shared `sidecars.shared.llm_client` instead of bespoke per-sidecar Ollama helpers.
+- `PortalConfig` (hunter) gains `provider`, `googleApiKey`, `googleModel` fields, threaded through the hunt config from the frontend.
+
 ## [1.3.0] - 2026-08-02
 
 ### Added

@@ -11,6 +11,8 @@ from typing import List, Dict, Optional
 
 import chromadb
 
+from sidecars.shared.llm_client import GoogleEmbeddingFunction
+
 logger = logging.getLogger("rag.chroma_client")
 
 DB_PATH = os.environ.get(
@@ -28,8 +30,12 @@ class ChromaClient:
     via ``_ensure_client``.
     """
 
-    def __init__(self):
+    def __init__(self, google_api_key: str = ""):
         self._client: Optional[chromadb.PersistentClient] = None
+        self.google_api_key = google_api_key or os.environ.get("GOOGLE_API_KEY", "")
+        self._use_google_embeddings = bool(
+            (os.environ.get("LLM_PROVIDER", "google") == "google") and self.google_api_key
+        )
 
     def _ensure_client(self) -> chromadb.PersistentClient:
         """Initialize the embedded ChromaDB client if not already done."""
@@ -81,9 +87,10 @@ class ChromaClient:
         def run_get_or_create():
             try:
                 client = self._ensure_client()
-                col = client.get_or_create_collection(
-                    name=name, metadata={"hnsw:space": "cosine"}
-                )
+                kwargs = {"metadata": {"hnsw:space": "cosine"}}
+                if self._use_google_embeddings:
+                    kwargs["embedding_function"] = GoogleEmbeddingFunction(self.google_api_key)
+                col = client.get_or_create_collection(name=name, **kwargs)
                 return col
             except Exception as e:
                 logger.error(

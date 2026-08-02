@@ -72,9 +72,18 @@ async def handle_analyze_gaps(params: dict, req_id: str):
 
     try:
         loop = asyncio.get_running_loop()
+        provider_config = {
+            "provider": params.get("provider"),
+            "google_api_key": params.get("google_api_key"),
+            "google_model": params.get("google_model"),
+            "ollama_url": params.get("ollama_url"),
+            "ollama_model": params.get("ollama_model"),
+        }
         gaps = await loop.run_in_executor(
             None,
-            lambda: analyze_gaps(rfp_id, ollama_url, ollama_model),
+            lambda: analyze_gaps(
+                rfp_id, ollama_url, ollama_model, provider_config=provider_config
+            ),
         )
         emit_result({"rfp_id": rfp_id, "gaps": gaps}, req_id)
     except Exception as e:

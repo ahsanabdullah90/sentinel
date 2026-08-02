@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Portal, Opportunity } from '../types';
+import { Portal, Opportunity, AppSettings } from '../types';
 
 // Context shape
 export interface AppContextProps {
@@ -28,8 +28,8 @@ export interface AppContextProps {
   setEditingPortal: React.Dispatch<React.SetStateAction<Portal | null>>;
   isSettingsOpen: boolean;
   setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  settings: { ollamaModel: string; ollamaUrl: string };
-  setSettings: React.Dispatch<React.SetStateAction<{ ollamaModel: string; ollamaUrl: string }>>;
+  settings: AppSettings;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   isOpportunitiesOpen: boolean;
   setIsOpportunitiesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   selectedOpportunityId: string | null;
@@ -48,7 +48,9 @@ export interface AppContextProps {
   loadPortals: () => Promise<void>;
   loadOpportunities: () => Promise<void>;
   bootstrapEngines: () => Promise<void>;
-  checkOllama: () => Promise<void>;
+  checkOllama: () => Promise<string>;
+  checkLLMProvider: () => Promise<string>;
+  detectProvider: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextProps | undefined>(undefined);
@@ -74,17 +76,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [lastAutoHuntTimestamp, setLastAutoHuntTimestamp] = useState<string | null>(null);
 
-  interface AppSettings {
-    ollamaModel: string;
-    ollamaUrl: string;
-  }
-
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const saved = localStorage.getItem('sentinel_settings');
       if (saved) {
         const parsed = JSON.parse(saved) as AppSettings;
         return {
+          provider: parsed.provider === 'ollama' ? 'ollama' : 'google',
+          googleApiKey: typeof parsed.googleApiKey === 'string' ? parsed.googleApiKey : '',
+          googleModel: typeof parsed.googleModel === 'string' ? parsed.googleModel : 'gemini-2.5-flash',
           ollamaModel: typeof parsed.ollamaModel === 'string' ? parsed.ollamaModel : '',
           ollamaUrl: typeof parsed.ollamaUrl === 'string' ? parsed.ollamaUrl : 'http://127.0.0.1:11434',
         };
@@ -92,7 +92,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     } catch (e) {
       console.error('Failed to parse settings from localStorage:', e);
     }
-    return { ollamaModel: '', ollamaUrl: 'http://127.0.0.1:11434' };
+    return {
+      provider: 'google',
+      googleApiKey: '',
+      googleModel: 'gemini-2.5-flash',
+      ollamaModel: '',
+      ollamaUrl: 'http://127.0.0.1:11434',
+    };
   });
 
   useEffect(() => {
@@ -150,8 +156,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // ---------- Core Functions ----------
+  const isProviderReady = async (): Promise<boolean> => {
+    if (settings.provider === 'google' && !settings.googleApiKey) {
+      return false;
+    }
+    if (settings.provider === 'ollama') {
+      const status = await checkOllama();
+      return status === 'Online';
+    }
+    return true;
+  };
+
   const handleStartHunt = async (portalId: string) => {
     try {
+      // Block hunt if the AI provider is not configured / reachable
+      if (!(await isProviderReady())) {
+        setHuntLogs((prev) => [
+          ...prev,
+          `[ERROR] No AI provider configured. Open Settings and connect Google Gemini or Ollama.`,
+        ]);
+        setIsSettingsOpen(true);
+        return;
+      }
       setHunting(true);
       setHuntLogs([
         `[${new Date().toLocaleTimeString()}] Spawning headless Chromium browser engine...`,
@@ -161,6 +187,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const portal = portals.find(p => p.id === portalId);
       const portalWithSettings = portal ? {
         ...portal,
+        provider: settings.provider,
+        googleApiKey: settings.googleApiKey,
+        googleModel: settings.googleModel,
         ollamaUrl: settings.ollamaUrl,
         ollamaModel: settings.ollamaModel,
       } : null;
@@ -271,6 +300,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             startTimeRef.current = Date.now();
             const portalWithSettings = {
               ...portal,
+              provider: settings.provider,
+              googleApiKey: settings.googleApiKey,
+              googleModel: settings.googleModel,
               ollamaUrl: settings.ollamaUrl,
               ollamaModel: settings.ollamaModel,
             };
@@ -329,14 +361,62 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const checkOllama = async () => {
+  const checkLLMProvider = async () => {
     setOllamaStatus('Checking...');
     try {
-      const status = await invoke('check_ollama_status', { url: settings.ollamaUrl });
+      const status = await invoke('check_llm_provider', {
+        provider: settings.provider,
+        ollamaUrl: settings.ollamaUrl,
+        googleApiKey: settings.googleApiKey,
+        googleModel: settings.googleModel,
+      });
       setOllamaStatus(status as string);
+      return status as string;
+    } catch (error) {
+      console.error('Failed to check LLM provider:', error);
+      setOllamaStatus('Offline');
+      return 'Offline';
+    }
+  };
+
+  const checkOllama = async () => {
+    try {
+      const status = await invoke('check_ollama_status', { url: settings.ollamaUrl });
+      return status as string;
     } catch (error) {
       console.error('Failed to check Ollama:', error);
-      setOllamaStatus('Offline');
+      return 'Offline';
+    }
+  };
+
+  // Provider detection at boot: if Ollama is online, prefer it; otherwise fall back to Google.
+  const detectProvider = async () => {
+    try {
+      const ollamaStatus = await checkOllama();
+      if (ollamaStatus === 'Online') {
+        setSettings((prev) => ({ ...prev, provider: 'ollama' }));
+        setOllamaStatus('Online (Ollama)');
+        return;
+      }
+      // Ollama offline -> Google (cloud-first)
+      setSettings((prev) => {
+        const next = { ...prev, provider: 'google' as const };
+        return next;
+      });
+      if (settings.googleApiKey) {
+        const status = await invoke('check_llm_provider', {
+          provider: 'google',
+          ollamaUrl: settings.ollamaUrl,
+          googleApiKey: settings.googleApiKey,
+          googleModel: settings.googleModel,
+        });
+        setOllamaStatus(status as string);
+      } else {
+        setOllamaStatus('Not Configured');
+      }
+    } catch (error) {
+      console.error('Provider detection failed:', error);
+      setOllamaStatus('Not Configured');
     }
   };
 
@@ -481,7 +561,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Trigger boot sequence
   useEffect(() => {
     void bootstrapEngines();
-    void checkOllama();
+    void detectProvider();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -527,6 +607,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     loadOpportunities,
     bootstrapEngines,
     checkOllama,
+    checkLLMProvider,
+    detectProvider,
   };
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;

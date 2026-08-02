@@ -2,6 +2,15 @@
 
 A privacy‑first desktop application built with **Tauri**, **React**, **TypeScript**, and **Vite**.
 
+## ☁️ AI Provider
+
+Sentinel is **cloud-first**: by default it uses **Google Gemini** (Google AI Studio API key) for extraction, drafting, gap analysis, and vision — no local model capacity required.
+
+- **Google Gemini** (default): add your API key in **Settings → AI Provider → Google Gemini**.
+- **Ollama (Local)**: optional. If Ollama is running on port `11434`, the app auto-detects it and offers it as the provider in Settings.
+
+On boot the app probes Ollama; if absent it falls back to Google and prompts you to connect a provider before running hunts.
+
 ## 🏗️ Architecture
 
 Sentinel uses a multi-service architecture entirely embedded locally for maximum privacy and performance. No Docker or network ports required.
@@ -26,7 +35,8 @@ Services communicate via high-performance **JSON-RPC over standard input/output 
 | Python | >= 3.11 | https://python.org |
 | Rust | stable | https://rustup.rs |
 | MSVC Build Tools | 2022+ | `winget install Microsoft.VisualStudio.2022.BuildTools` |
-| Ollama | latest | https://ollama.com |
+| Google AI Studio API key | (recommended) | https://aistudio.google.com/apikey |
+| Ollama | optional | https://ollama.com |
 
 ### One-Command Setup
 
@@ -43,7 +53,7 @@ run.bat
 ```
 
 The launcher automatically:
-- Starts Ollama if not running
+- Detects Ollama (optional; the app can use Google Gemini cloud instead)
 - Verifies all dependencies
 - Launches the Tauri development server
 

@@ -18,7 +18,7 @@ from sidecars.rag.src_py.events import emit_progress, emit_warning
 logger = logging.getLogger("rag.ingest")
 
 
-async def ingest_document(rfp_id: str, file_path: str) -> dict:
+async def ingest_document(rfp_id: str, file_path: str, google_api_key: str = "") -> dict:
     """Ingest a document into the RAG pipeline.
 
     Args:
@@ -54,7 +54,7 @@ async def ingest_document(rfp_id: str, file_path: str) -> dict:
 
     # 3. Store in Chroma
     try:
-        chroma = ChromaClient()
+        chroma = ChromaClient(google_api_key=google_api_key)
         is_chroma_up = await chroma.check_health()
 
         if is_chroma_up:

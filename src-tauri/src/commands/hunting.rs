@@ -69,10 +69,22 @@ pub async fn stop_hunt_session(
 pub async fn detect_portal(
     app: AppHandle,
     url: String,
+    provider: Option<String>,
+    google_api_key: Option<String>,
+    google_model: Option<String>,
+    ollama_url: Option<String>,
+    ollama_model: Option<String>,
 ) -> Result<(), SentinelError> {
     info!("Detecting portal at URL: {}", url);
     let req_id = uuid::Uuid::new_v4().to_string();
-    let params = serde_json::json!({ "url": url });
+    let params = serde_json::json!({
+        "url": url,
+        "provider": provider,
+        "google_api_key": google_api_key,
+        "google_model": google_model,
+        "ollama_url": ollama_url,
+        "ollama_model": ollama_model,
+    });
     execute_jsonrpc_method(app, "hunter", "detect", params, &req_id).await?;
     Ok(())
 }

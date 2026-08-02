@@ -20,11 +20,14 @@ export function GapReport() {
     setLoading(true);
     setError(null);
     try {
-      // Call mock command
+      // Call gap analysis command with provider config
       const result = await invoke('analyze_gaps', {
         rfpId,
         ollamaUrl: settings.ollamaUrl,
         ollamaModel: settings.ollamaModel,
+        provider: settings.provider,
+        apiKey: settings.googleApiKey,
+        googleModel: settings.googleModel,
       });
       setGaps(result as Gap[]);
     } catch (err: any) {
