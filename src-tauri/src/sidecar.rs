@@ -215,7 +215,7 @@ pub async fn spawn_python_sidecar(
                                             let url = opp.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                                             let description = opp.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
                                             
-                                            if let Err(e) = crate::db::queries::record_opportunity(&app_clone, opp_id, portal_id, title, agency, due_date, url, description) {
+                                            if let Err(e) = crate::db::queries::record_opportunity(&app_clone, opp_id, Some(portal_id), title, agency, due_date, url, description) {
                                                 error!("Failed to auto-persist opportunity: {}", e);
                                             }
                                         }

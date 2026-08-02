@@ -5,6 +5,16 @@ All notable changes to the Sentinel project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-08-02
+
+### Added
+
+- **Add Opportunity from Link**: The Opportunities modal now has a "Paste Link" mode. Pasting an opportunity URL and clicking "Fetch Details" invokes the new `fetch_opportunity_from_url` command, which uses the hunter sidecar (`extract_opportunity`) with Playwright + local Ollama to auto-populate title, issuing organization, deadline, and description. Fields remain editable before saving.
+- **Optional Portal**: `portal_id` is now nullable (Migration 13 rebuilds the `opportunities` table). Manually added opportunities no longer require a source portal; they display under "Manual Entry" and are counted without a portal.
+- **Inline Edit**: The opportunity detail view now supports editing core fields (title, issuing organization, deadline, URL, description) via an Edit button and `edit_opportunity_fields` command.
+- **Migration 13**: Rebuilds the `opportunities` table to drop the restrictive `status CHECK` constraint (which blocked `applied` / `dismissed` values) and makes `portal_id` nullable. All existing columns are preserved.
+- **Hunter sidecar `extract_opportunity`**: New JSON-RPC method that fetches a single opportunity URL, validates it is not a 404 / custom error page, and extracts structured details via local Ollama (prefers `qwen3` / `gemma3` models).
+
 ## [1.2.0] - 2026-08-02
 
 ### Added

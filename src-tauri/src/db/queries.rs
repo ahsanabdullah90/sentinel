@@ -90,7 +90,7 @@ pub fn fetch_portals(app: &AppHandle) -> Result<Vec<Portal>, SentinelError> {
 pub fn fetch_opportunities(app: &AppHandle) -> Result<Vec<Opportunity>, SentinelError> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, p.name, o.url, p.base_url, o.description, o.priority, o.applied_at, o.submission_ref, o.apply_notes, o.dismiss_note FROM opportunities o JOIN portals p ON o.portal_id = p.id ORDER BY o.created_at DESC"
+        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, COALESCE(p.name, 'Manual Entry'), o.url, p.base_url, o.description, o.priority, o.applied_at, o.submission_ref, o.apply_notes, o.dismiss_note FROM opportunities o LEFT JOIN portals p ON o.portal_id = p.id ORDER BY o.created_at DESC"
     ).map_err(|e| SentinelError::Database(e.to_string()))?;
 
     let rows = stmt.query_map([], |row| {
@@ -188,7 +188,7 @@ pub fn finish_portal_run(
 pub fn record_opportunity(
     app: &AppHandle,
     id: String,
-    portal_id: String,
+    portal_id: Option<String>,
     title: String,
     agency: String,
     due_date: String,
@@ -215,11 +215,13 @@ pub fn record_opportunity(
         params![id, portal_id, title, agency, due_date, "discovered", url, description]
     ).map_err(|e| SentinelError::Database(e.to_string()))?;
     
-    // Increment opportunity count in portals
-    conn.execute(
-        "UPDATE portals SET opportunities_count = COALESCE(opportunities_count, 0) + 1 WHERE id = ?",
-        params![portal_id]
-    ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    // Increment opportunity count in portals (skip when no portal)
+    if let Some(portal_id) = portal_id {
+        conn.execute(
+            "UPDATE portals SET opportunities_count = COALESCE(opportunities_count, 0) + 1 WHERE id = ?",
+            params![portal_id]
+        ).map_err(|e| SentinelError::Database(e.to_string()))?;
+    }
     
     Ok(true)
 }
@@ -242,6 +244,23 @@ pub fn update_opportunity_details(
             params![description, id]
         ).map_err(|e| SentinelError::Database(e.to_string()))?;
     }
+    Ok(())
+}
+
+pub fn edit_opportunity_fields(
+    app: &AppHandle,
+    id: String,
+    title: String,
+    issuing_org: String,
+    deadline_at: String,
+    url: String,
+    description: String,
+) -> Result<(), SentinelError> {
+    let conn = get_db_connection(app)?;
+    conn.execute(
+        "UPDATE opportunities SET title = ?, issuing_org = ?, deadline_at = ?, url = ?, description = ? WHERE id = ?",
+        params![title, issuing_org, deadline_at, url, description, id]
+    ).map_err(|e| SentinelError::Database(e.to_string()))?;
     Ok(())
 }
 
@@ -417,8 +436,8 @@ pub fn expire_not_applied(app: &AppHandle) -> Result<usize, SentinelError> {
 pub fn get_opportunity_detail(app: &AppHandle, id: String) -> Result<Option<Opportunity>, SentinelError> {
     let conn = get_db_connection(app)?;
     let mut stmt = conn.prepare(
-        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, p.name, o.url, p.base_url, o.description, o.priority, o.applied_at, o.submission_ref, o.apply_notes, o.dismiss_note 
-         FROM opportunities o JOIN portals p ON o.portal_id = p.id WHERE o.id = ?"
+        "SELECT o.id, o.title, o.issuing_org, o.deadline_at, o.status, COALESCE(p.name, 'Manual Entry'), o.url, p.base_url, o.description, o.priority, o.applied_at, o.submission_ref, o.apply_notes, o.dismiss_note 
+         FROM opportunities o LEFT JOIN portals p ON o.portal_id = p.id WHERE o.id = ?"
     ).map_err(|e| SentinelError::Database(e.to_string()))?;
 
     let mut rows = stmt.query(params![id]).map_err(|e| SentinelError::Database(e.to_string()))?;

@@ -78,6 +78,15 @@ export function OpportunityDetail({
   const [kbItems, setKbItems] = useState<KnowledgeItem[]>([]);
   const [selectedKbs, setSelectedKbs] = useState<string[]>([]);
 
+  // Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editOrg, setEditOrg] = useState('');
+  const [editDeadline, setEditDeadline] = useState('');
+  const [editUrl, setEditUrl] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+
   // Drafting states
   const [isDrafting, setIsDrafting] = useState(false);
   const [draftContent, setDraftContent] = useState('');
@@ -274,6 +283,31 @@ export function OpportunityDetail({
       console.error('Failed to load opportunity detail:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!opp) return;
+    if (!editTitle.trim()) {
+      setEditError('Title is required');
+      return;
+    }
+    try {
+      await invoke('edit_opportunity_fields', {
+        id: opp.id,
+        title: editTitle.trim(),
+        issuingOrg: editOrg.trim(),
+        deadlineAt: editDeadline.trim(),
+        url: editUrl.trim(),
+        description: editDescription,
+      });
+      setIsEditing(false);
+      setEditError(null);
+      void loadOpportunityDetails();
+      onRefresh();
+    } catch (err: any) {
+      console.error('Failed to edit opportunity:', err);
+      setEditError(err?.message || String(err) || 'Failed to save changes');
     }
   }
 
@@ -777,19 +811,123 @@ End of Auto-Generated Proposal Draft.`;
                   </span>
                 )}
                 <span style={{ fontSize: '0.8rem', color: '#8b90a0' }}>ID: {opp.id}</span>
+                {!isEditing && (
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => {
+                      setEditTitle(opp.title);
+                      setEditOrg(opp.issuing_org || '');
+                      setEditDeadline(opp.date || '');
+                      setEditUrl(opp.url || '');
+                      setEditDescription(opp.description || '');
+                      setEditError(null);
+                      setIsEditing(true);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      gap: '4px',
+                      alignItems: 'center',
+                      fontSize: '0.75rem',
+                      marginLeft: 'auto',
+                    }}
+                  >
+                    <ExternalLink size={12} style={{ transform: 'none' }} />
+                    Edit
+                  </button>
+                )}
               </div>
 
-              <h2
-                style={{
-                  color: '#fff',
-                  fontSize: '1.5rem',
-                  marginTop: 0,
-                  marginBottom: '15px',
-                  fontWeight: 600,
-                }}
-              >
-                {opp.title}
-              </h2>
+              {isEditing ? (
+                <div
+                  className="card glass"
+                  style={{
+                    border: '1px solid rgba(0, 122, 255, 0.3)',
+                    marginBottom: '20px',
+                    padding: '18px',
+                    backgroundColor: '#111112',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                  }}
+                >
+                  <h2 style={{ color: '#fff', fontSize: '1.1rem', margin: 0, fontWeight: 600 }}>
+                    Edit Opportunity
+                  </h2>
+                  {editError && (
+                    <div style={{ color: '#ff453a', fontSize: '0.85rem', backgroundColor: 'rgba(255,69,58,0.1)', padding: '8px', borderRadius: '4px' }}>
+                      {editError}
+                    </div>
+                  )}
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                    Title
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      style={{ padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff' }}
+                    />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                      Issuing Organization
+                      <input
+                        type="text"
+                        value={editOrg}
+                        onChange={(e) => setEditOrg(e.target.value)}
+                        style={{ padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff' }}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                      Deadline Date
+                      <input
+                        type="text"
+                        value={editDeadline}
+                        onChange={(e) => setEditDeadline(e.target.value)}
+                        placeholder="e.g. 2026-08-30"
+                        style={{ padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff' }}
+                      />
+                    </label>
+                  </div>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                    URL
+                    <input
+                      type="text"
+                      value={editUrl}
+                      onChange={(e) => setEditUrl(e.target.value)}
+                      style={{ padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff' }}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.75rem', color: '#8b90a0' }}>
+                    Description
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      rows={5}
+                      style={{ padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff', resize: 'vertical' }}
+                    />
+                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setIsEditing(false)}>
+                      Cancel
+                    </button>
+                    <button className="btn btn-primary btn-sm" onClick={() => void handleSaveEdit()}>
+                      Save Changes
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <h2
+                    style={{
+                      color: '#fff',
+                      fontSize: '1.5rem',
+                      marginTop: 0,
+                      marginBottom: '15px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {opp.title}
+                  </h2>
 
               {/* Metadata Table */}
               <div
@@ -886,6 +1024,8 @@ End of Auto-Generated Proposal Draft.`;
                   </span>
                 </div>
               </div>
+                </>
+              )}
             </div>
           )}
 

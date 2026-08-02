@@ -17,6 +17,7 @@ The Hunter sidecar communicates purely via standard input (`stdin`) and standard
 - **Methods Received**:
   - `detect_portal`: Analyzes a URL's markup to determine the portal structure (auth method, login elements).
   - `start_hunt`: Spawns the web scraper to crawl opportunities based on search keywords.
+  - `extract_opportunity`: Fetches a single opportunity URL (Playwright), validates it is not a 404 / custom error page, and extracts `title`, `description`, `agency`, `dueDate` via local Ollama (`single_opportunity.py`).
 - **Events Emitted**:
   - `portal_detected`: Emits a structured detection report (e.g. login selectors, API endpoints).
   - `opportunity_found`: Streams details of an identified RFP (title, link, description, release date).
@@ -29,6 +30,7 @@ The Hunter sidecar communicates purely via standard input (`stdin`) and standard
 - `portal_analyzer.py`: Checks URL headings and markers to auto-detect the portal category.
 - `portal_runner.py`: Controls execution loop for scraping jobs.
 - `rate_limiter.py`: Implements a secure token-bucket rate limiter with exponential back-off and captcha handling.
+- `single_opportunity.py`: Single-URL extraction used by `extract_opportunity`.
 - `models.py`: Defines data schemas for portal presets and opportunities.
 - `adapters/`: Generic fallback scraper and custom site-specific scrapers (e.g. BrightSpyre).
 

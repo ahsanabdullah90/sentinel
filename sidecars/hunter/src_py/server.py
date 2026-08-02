@@ -25,6 +25,7 @@ if getattr(sys, 'frozen', False):
 
 from sidecars.hunter.src_py.portal_analyzer import analyze_portal
 from sidecars.hunter.src_py.portal_runner import PortalRunner
+from sidecars.hunter.src_py.single_opportunity import extract_single_opportunity
 from sidecars.hunter.src_py.models import PortalConfig
 
 # ---------------------------------------------------------------------------
@@ -84,6 +85,35 @@ async def handle_detect(params: dict, req_id: str):
         })
     finally:
         await _emit_ipc({"event": "detect_complete", "req_id": req_id})
+
+async def handle_extract_opportunity(params: dict, req_id: str):
+    url = params.get("url")
+    if not url:
+        await _emit_ipc({
+            "event": "extract_opportunity_result",
+            "json_payload": json.dumps({"error": "Missing url"}),
+            "payload_type": 0,
+            "req_id": req_id
+        })
+        return
+
+    logger.info(f"JSON-RPC ExtractOpportunity request received for URL: {url}")
+    try:
+        result = await extract_single_opportunity(url)
+        await _emit_ipc({
+            "event": "extract_opportunity_result",
+            "json_payload": json.dumps(result),
+            "payload_type": 0,
+            "req_id": req_id
+        })
+    except Exception as e:
+        logger.error(f"Error in extract_opportunity: {str(e)}")
+        await _emit_ipc({
+            "event": "extract_opportunity_result",
+            "json_payload": json.dumps({"error": str(e)}),
+            "payload_type": 0,
+            "req_id": req_id
+        })
 
 async def handle_hunt(params: dict, req_id: str):
     portal_id = params.get("portal_id", "")
@@ -214,6 +244,10 @@ async def serve():
                     task.add_done_callback(active_tasks.discard)
                 elif method == "hunt":
                     task = asyncio.create_task(handle_hunt(params, req_id))
+                    active_tasks.add(task)
+                    task.add_done_callback(active_tasks.discard)
+                elif method == "extract_opportunity":
+                    task = asyncio.create_task(handle_extract_opportunity(params, req_id))
                     active_tasks.add(task)
                     task.add_done_callback(active_tasks.discard)
                 else:

@@ -222,14 +222,14 @@ pub async fn delete_knowledge_item(app: AppHandle, id: String) -> Result<(), Sen
 #[tauri::command]
 pub async fn create_opportunity(
     app: AppHandle,
-    portal_id: String,
+    portal_id: Option<String>,
     title: String,
     issuing_org: String,
     deadline_at: String,
     url: String,
     description: String,
 ) -> Result<bool, SentinelError> {
-    let portal_id_clean = portal_id.trim().to_string();
+    let portal_id_clean = portal_id.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
     let title_clean = title.trim().to_string();
     let url_clean = url.trim().to_string();
     let issuing_org_clean = issuing_org.trim().to_string();
@@ -238,9 +238,6 @@ pub async fn create_opportunity(
 
     if title_clean.is_empty() {
         return Err(SentinelError::Database("Opportunity title cannot be empty".to_string()));
-    }
-    if portal_id_clean.is_empty() {
-        return Err(SentinelError::Database("Source portal must be specified".to_string()));
     }
     if title_clean.contains('<') || title_clean.contains('>') {
         return Err(SentinelError::Database("Invalid HTML tags in opportunity title".to_string()));
@@ -269,4 +266,24 @@ pub async fn create_opportunity(
         url_clean, 
         description_clean
     )
+}
+
+#[tauri::command]
+pub async fn edit_opportunity_fields(
+    app: AppHandle,
+    id: String,
+    title: String,
+    issuing_org: String,
+    deadline_at: String,
+    url: String,
+    description: String,
+) -> Result<(), SentinelError> {
+    crate::db::queries::edit_opportunity_fields(&app, id, title, issuing_org, deadline_at, url, description)
+}
+
+#[tauri::command]
+pub async fn fetch_opportunity_from_url(app: AppHandle, url: String) -> Result<serde_json::Value, SentinelError> {
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let params = serde_json::json!({ "url": url });
+    crate::sidecar::execute_jsonrpc_method_await(app, "hunter", "extract_opportunity", params, &req_id).await
 }

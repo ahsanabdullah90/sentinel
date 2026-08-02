@@ -47,6 +47,9 @@ export function OpportunitiesModal({
 
   // Manual creation states
   const [isAdding, setIsAdding] = useState(false);
+  const [addMode, setAddMode] = useState<'manual' | 'link'>('manual');
+  const [linkUrl, setLinkUrl] = useState('');
+  const [isFetching, setIsFetching] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newPortalId, setNewPortalId] = useState('');
   const [newIssuingOrg, setNewIssuingOrg] = useState('');
@@ -88,10 +91,6 @@ export function OpportunitiesModal({
       setAddError('Title is required');
       return;
     }
-    if (!cleanPortalId) {
-      setAddError('Please select a Portal');
-      return;
-    }
     if (cleanUrl && !/^https?:\/\/[^\s$.?#].[^\s]*$/i.test(cleanUrl)) {
       setAddError('Invalid URL format. Must start with http:// or https://');
       return;
@@ -101,7 +100,7 @@ export function OpportunitiesModal({
     setAddSuccess(null);
     try {
       const isOk = await invoke<boolean>('create_opportunity', {
-        portalId: cleanPortalId,
+        portalId: cleanPortalId || null,
         title: cleanTitle,
         issuingOrg: cleanIssuingOrg,
         deadlineAt: cleanDeadline,
@@ -116,7 +115,9 @@ export function OpportunitiesModal({
         setNewDeadline('');
         setNewUrl('');
         setNewDescription('');
+        setLinkUrl('');
         setIsAdding(false);
+        setAddMode('manual');
         onRefresh();
       } else {
         setAddError('Opportunity with this title already exists.');
@@ -127,6 +128,43 @@ export function OpportunitiesModal({
     }
   };
   const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleFetchFromLink = async () => {
+    const cleanUrl = sanitizeInput(linkUrl);
+    if (!/^https?:\/\/[^\s$.?#].[^\s]*$/i.test(cleanUrl)) {
+      setAddError('Please enter a valid URL starting with http:// or https://');
+      return;
+    }
+    setAddError(null);
+    setIsFetching(true);
+    try {
+      const raw = await invoke<any>('fetch_opportunity_from_url', { url: cleanUrl });
+      // The sidecar replies with { event, json_payload, req_id }; parse json_payload if present
+      let data = raw;
+      if (raw && typeof raw.json_payload === 'string') {
+        try {
+          data = JSON.parse(raw.json_payload);
+        } catch (e) {
+          console.error('Failed to parse json_payload:', e);
+        }
+      }
+      if (data?.error) {
+        setAddError(data.error);
+      } else {
+        setNewTitle(data?.title || '');
+        setNewIssuingOrg(data?.agency || '');
+        setNewDeadline(data?.dueDate || '');
+        setNewDescription(data?.description || '');
+        setNewUrl(cleanUrl);
+        if (data?.title) setAddSuccess('Details fetched. Review and save.');
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch from link:', err);
+      setAddError(err?.message || String(err) || 'Failed to fetch opportunity details');
+    } finally {
+      setIsFetching(false);
+    }
+  };
 
   // Custom scroll states
   const [scrollTop, setScrollTop] = useState(0);
@@ -587,7 +625,12 @@ export function OpportunitiesModal({
           </span>
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => setIsAdding(!isAdding)}
+            onClick={() => {
+              setIsAdding(!isAdding);
+              setAddMode('manual');
+              setAddError(null);
+              setAddSuccess(null);
+            }}
             style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '5px' }}
           >
             <Plus size={14} />
@@ -768,9 +811,35 @@ export function OpportunitiesModal({
             }}
           >
             <h4 style={{ margin: 0, color: '#fff', fontSize: '1rem', fontWeight: 600 }}>
-              Manually Enter Opportunity
+              Add Opportunity
             </h4>
-            
+
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '2px' }}>
+              <button
+                className="btn btn-sm"
+                onClick={() => { setAddMode('link'); setAddError(null); setAddSuccess(null); }}
+                style={{
+                  backgroundColor: addMode === 'link' ? 'var(--accent-color)' : 'rgba(255,255,255,0.06)',
+                  color: addMode === 'link' ? '#fff' : '#8b90a0',
+                  border: 'none',
+                }}
+              >
+                Paste Link
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => { setAddMode('manual'); setAddError(null); setAddSuccess(null); }}
+                style={{
+                  backgroundColor: addMode === 'manual' ? 'var(--accent-color)' : 'rgba(255,255,255,0.06)',
+                  color: addMode === 'manual' ? '#fff' : '#8b90a0',
+                  border: 'none',
+                }}
+              >
+                Manual Entry
+              </button>
+            </div>
+
             {addError && (
               <div style={{ color: '#ff453a', fontSize: '0.85rem', backgroundColor: 'rgba(255, 69, 58, 0.1)', padding: '8px', borderRadius: '4px' }}>
                 {addError}
@@ -779,6 +848,26 @@ export function OpportunitiesModal({
             {addSuccess && (
               <div style={{ color: '#30d158', fontSize: '0.85rem', backgroundColor: 'rgba(48, 209, 88, 0.1)', padding: '8px', borderRadius: '4px' }}>
                 {addSuccess}
+              </div>
+            )}
+
+            {addMode === 'link' && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="https://example.com/rfp-details"
+                  style={{ flex: 1, padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff' }}
+                />
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void handleFetchFromLink()}
+                  disabled={isFetching}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {isFetching ? 'Fetching...' : 'Fetch Details'}
+                </button>
               </div>
             )}
 
@@ -794,13 +883,13 @@ export function OpportunitiesModal({
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#8b90a0', marginBottom: '4px' }}>Source Portal *</label>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#8b90a0', marginBottom: '4px' }}>Source Portal (optional)</label>
                 <select
                   value={newPortalId}
                   onChange={(e) => setNewPortalId(e.target.value)}
                   style={{ width: '100%', padding: '8px', backgroundColor: '#181819', border: '1px solid #333', borderRadius: '4px', color: '#fff', height: '38px' }}
                 >
-                  <option value="">-- Select Portal --</option>
+                  <option value="">-- No Portal (Manual Entry) --</option>
                   {portals.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}

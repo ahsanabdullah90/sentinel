@@ -336,6 +336,8 @@ pub fn run() {
             commands::db_commands::save_knowledge_item,
             commands::db_commands::delete_knowledge_item,
             commands::db_commands::create_opportunity,
+            commands::db_commands::edit_opportunity_fields,
+            commands::db_commands::fetch_opportunity_from_url,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

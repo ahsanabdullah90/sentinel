@@ -16,15 +16,16 @@ The frontend provides the user interface for the Sentinel RFP Agent. It allows u
 ### Views / Components
 - **Main Dashboard** (`App.tsx`): Manages global dashboard layouts and states. Feed rows show priority / applied / dismissed badges.
 - **Portal Configurations** (`PortalConfigModal.tsx`): Managing target website feeds and testing IPC connections.
-- **Opportunities** (`OpportunitiesModal.tsx`, `OpportunityDetail.tsx`): Browsing and detailing crawled RFPs. The modal groups opportunities under **Not Applied**, **Applied**, and **Dismissed** headings, with per-card priority selection, an "Apply" form (date / reference / notes), and a "Dismiss" action. Expired not-applied opportunities auto-move to Dismissed with a `deadline expired` note on open.
+- **Opportunities** (`OpportunitiesModal.tsx`, `OpportunityDetail.tsx`): Browsing and detailing crawled RFPs. The modal groups opportunities under **Not Applied**, **Applied**, and **Dismissed** headings, with per-card priority selection, an "Apply" form (date / reference / notes), and a "Dismiss" action. Expired not-applied opportunities auto-move to Dismissed with a `deadline expired` note on open. Manual addition supports both a **Paste Link** mode (auto-fetches title / organization / deadline / description via `fetch_opportunity_from_url`) and a full **Manual Entry** form; portal selection is optional. The detail view supports inline editing of core fields.
 - **Knowledge Base** (`KnowledgeBaseDashboard.tsx`): Managing vector store document indices.
 - **Gap Report** (`GapReport.tsx`): Multi-dimensional compliance gap and risk matrix reports with try-catch safety guards.
 - **Settings** (`SettingsModal.tsx`): Configuring model preferences (Ollama settings, model names).
 
 ### Tauri Commands Called (`invoke`)
 - `get_portals`, `save_portal`, `delete_portal`, `toggle_portal_status`, `finish_active_hunt`
-- `get_opportunities_list`, `get_opportunity_detail`, `update_opportunity_status`, `delete_opportunity`
+- `get_opportunities_list`, `get_opportunity_detail`, `update_opportunity_status`, `delete_opportunity`, `create_opportunity`
 - `update_opportunity_priority`, `apply_opportunity`, `dismiss_opportunity`, `expire_not_applied`
+- `fetch_opportunity_from_url`, `edit_opportunity_fields`
 - `get_attachments`, `save_attachment`, `delete_attachment`, `update_attachment_text`, `open_attachment`
 - `get_proposal_drafts`, `save_proposal_draft`, `update_proposal_draft`, `delete_proposal_draft`
 - `get_knowledge_base`, `save_knowledge_item`, `delete_knowledge_item`

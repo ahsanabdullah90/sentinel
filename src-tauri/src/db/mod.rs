@@ -118,6 +118,32 @@ pub fn init() -> Vec<Migration> {
                   ALTER TABLE opportunities ADD COLUMN apply_notes TEXT;
                   ALTER TABLE opportunities ADD COLUMN dismiss_note TEXT;",
             kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 13,
+            description: "nullable_portal_and_drop_status_check",
+            sql: "ALTER TABLE opportunities RENAME TO opportunities_old;
+                  CREATE TABLE opportunities (
+                    id TEXT PRIMARY KEY,
+                    portal_id TEXT REFERENCES portals(id),
+                    title TEXT NOT NULL,
+                    issuing_org TEXT NOT NULL,
+                    deadline_at TEXT NOT NULL,
+                    downloaded_pdf_path TEXT,
+                    status TEXT NOT NULL DEFAULT 'discovered',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    url TEXT,
+                    description TEXT,
+                    priority TEXT DEFAULT 'none',
+                    applied_at TEXT,
+                    submission_ref TEXT,
+                    apply_notes TEXT,
+                    dismiss_note TEXT
+                  );
+                  INSERT INTO opportunities (id, portal_id, title, issuing_org, deadline_at, downloaded_pdf_path, status, created_at, url, description, priority, applied_at, submission_ref, apply_notes, dismiss_note)
+                    SELECT id, portal_id, title, issuing_org, deadline_at, downloaded_pdf_path, status, created_at, url, description, priority, applied_at, submission_ref, apply_notes, dismiss_note FROM opportunities_old;
+                  DROP TABLE opportunities_old;",
+            kind: MigrationKind::Up,
         }
     ]
 }
