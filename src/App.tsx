@@ -222,12 +222,12 @@ function App() {
           </h1>
           <div className="system-status-pills">
             <button
-              className={`pill ${ollamaStatus === 'Online' ? 'online' : ''}`}
+              className={`pill ${ollamaStatus.startsWith('Online') ? 'online' : ''}`}
               onClick={() => {
                 void checkOllama();
               }}
             >
-              <Wifi size={14} /> Ollama: {ollamaStatus}
+              <Wifi size={14} /> AI: {ollamaStatus}
             </button>
             <div className="pill online">
               <Database size={14} /> ChromaDB Connected

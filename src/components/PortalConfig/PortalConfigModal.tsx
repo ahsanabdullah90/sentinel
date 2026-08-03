@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useAppContext } from '../../context/AppContext';
 
 interface Portal {
   id: string;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Props) {
+  const { settings } = useAppContext();
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [keywords, setKeywords] = useState('');
@@ -50,7 +52,14 @@ export function PortalConfigModal({ isOpen, onClose, onSave, editingPortal }: Pr
     setTestError(null);
     setTestSuccess(false);
     try {
-      await invoke('detect_portal', { url });
+      await invoke('detect_portal', {
+        url,
+        provider: settings.provider,
+        googleApiKey: settings.googleApiKey,
+        googleModel: settings.googleModel,
+        ollamaUrl: settings.ollamaUrl,
+        ollamaModel: settings.ollamaModel,
+      });
       setTestSuccess(true);
     } catch (err: any) {
       console.error('Portal detection failed:', err);

@@ -38,7 +38,7 @@ export function KnowledgeBaseDashboard({ settings }: KnowledgeBaseProps) {
   const provider = settings?.provider || 'google';
   const ollamaModel = settings?.ollamaModel || 'phi3';
   const ollamaUrl = settings?.ollamaUrl || 'http://127.0.0.1:11434';
-  const visionModel = provider === 'ollama' ? ollamaModel : (settings?.googleModel || 'gemini-2.5-flash');
+  const visionModel = provider === 'ollama' ? ollamaModel : (settings?.googleModel || 'gemini-flash-latest');
   const googleApiKey = settings?.googleApiKey || '';
 
   const [items, setItems] = useState<KnowledgeItem[]>([]);

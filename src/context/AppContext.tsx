@@ -84,7 +84,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         return {
           provider: parsed.provider === 'ollama' ? 'ollama' : 'google',
           googleApiKey: typeof parsed.googleApiKey === 'string' ? parsed.googleApiKey : '',
-          googleModel: typeof parsed.googleModel === 'string' ? parsed.googleModel : 'gemini-2.5-flash',
+          googleModel: typeof parsed.googleModel === 'string' ? parsed.googleModel : 'gemini-flash-latest',
           ollamaModel: typeof parsed.ollamaModel === 'string' ? parsed.ollamaModel : '',
           ollamaUrl: typeof parsed.ollamaUrl === 'string' ? parsed.ollamaUrl : 'http://127.0.0.1:11434',
         };
@@ -95,7 +95,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     return {
       provider: 'google',
       googleApiKey: '',
-      googleModel: 'gemini-2.5-flash',
+      googleModel: 'gemini-flash-latest',
       ollamaModel: '',
       ollamaUrl: 'http://127.0.0.1:11434',
     };
@@ -399,24 +399,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
       // Ollama offline -> Google (cloud-first)
+      const googleKey = settings.googleApiKey;
       setSettings((prev) => {
         const next = { ...prev, provider: 'google' as const };
         return next;
       });
-      if (settings.googleApiKey) {
+      if (googleKey) {
         const status = await invoke('check_llm_provider', {
           provider: 'google',
           ollamaUrl: settings.ollamaUrl,
-          googleApiKey: settings.googleApiKey,
+          googleApiKey: googleKey,
           googleModel: settings.googleModel,
         });
         setOllamaStatus(status as string);
       } else {
         setOllamaStatus('Not Configured');
+        // Prompt the user to connect a provider before they run anything
+        setTimeout(() => setIsSettingsOpen(true), 800);
       }
     } catch (error) {
       console.error('Provider detection failed:', error);
       setOllamaStatus('Not Configured');
+      setTimeout(() => setIsSettingsOpen(true), 800);
     }
   };
 

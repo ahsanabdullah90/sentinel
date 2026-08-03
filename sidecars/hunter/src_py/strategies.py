@@ -830,7 +830,7 @@ Content:
         provider_cfg = {
             "provider": getattr(config, "provider", None) or os.environ.get("LLM_PROVIDER", "google"),
             "google_api_key": getattr(config, "google_api_key", None) or os.environ.get("GOOGLE_API_KEY", ""),
-            "google_model": getattr(config, "google_model", None) or os.environ.get("GOOGLE_LLM_MODEL", "gemini-2.5-flash"),
+            "google_model": getattr(config, "google_model", None) or os.environ.get("GOOGLE_LLM_MODEL", "gemini-flash-latest"),
             "ollama_url": config.ollama_url or os.environ.get("OLLAMA_URL", "http://localhost:11434"),
             "ollama_model": config.ollama_model or os.environ.get("OLLAMA_MODEL", ""),
         }

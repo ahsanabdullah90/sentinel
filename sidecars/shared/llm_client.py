@@ -14,7 +14,7 @@ explicit arguments, JSON-RPC params, or environment variables:
 
 - ``LLM_PROVIDER`` (``google`` | ``ollama``)
 - ``GOOGLE_API_KEY``
-- ``GOOGLE_LLM_MODEL`` (default ``gemini-2.5-flash``)
+- ``GOOGLE_LLM_MODEL`` (default ``gemini-flash-latest``)
 - ``OLLAMA_URL`` (default ``http://127.0.0.1:11434``)
 - ``OLLAMA_MODEL``
 """
@@ -27,9 +27,17 @@ import urllib.request
 
 logger = logging.getLogger("shared.llm_client")
 
-DEFAULT_GOOGLE_MODEL = "gemini-2.5-flash"
+DEFAULT_GOOGLE_MODEL = "gemini-flash-latest"
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 GOOGLE_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+# Fallback chain used when the configured Gemini model fails (404 / retired /
+# quota). The first model that succeeds wins.
+GOOGLE_MODEL_FALLBACKS = [
+    "gemini-flash-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -72,13 +80,35 @@ class LLMConfig:
 
 def _google_generate_sync(cfg: LLMConfig, prompt: str, system: str = None,
                           images: list = None) -> str:
-    """Call the Gemini generateContent REST API (blocking)."""
+    """Call the Gemini generateContent REST API (blocking).
+
+    If the configured model is retired / quota-limited, falls back through
+    ``GOOGLE_MODEL_FALLBACKS`` so a free-tier key keeps working.
+    """
     if not cfg.google_api_key:
         raise RuntimeError("Google API key is not configured. Add it in Settings.")
-    model = cfg.google_model or DEFAULT_GOOGLE_MODEL
 
+    candidates = [cfg.google_model or DEFAULT_GOOGLE_MODEL] + GOOGLE_MODEL_FALLBACKS
+    last_err = None
+    for model in candidates:
+        if not model:
+            continue
+        try:
+            return _google_generate_one(cfg, model, prompt, system, images)
+        except urllib.error.HTTPError as e:
+            last_err = e
+            # Only fall through on 404 (model retired) or 429 (quota/demand)
+            if e.code not in (404, 429):
+                raise
+            logger.warning(
+                f"Gemini model {model} failed with HTTP {e.code}; trying fallback."
+            )
+    raise RuntimeError(f"All Gemini models failed. Last error: {last_err}")
+
+
+def _google_generate_one(cfg: LLMConfig, model: str, prompt: str,
+                         system: str = None, images: list = None) -> str:
     contents: list = []
-    parts: list = []
     if system:
         contents.append({"role": "user", "parts": [{"text": system}]})
     user_parts: list = [{"text": prompt}]
@@ -129,7 +159,8 @@ def _google_list_models_sync(cfg: LLMConfig) -> list:
                 if name.startswith("models/"):
                     name = name[len("models/"):]
                 # Only surface chat-capable generation models
-                if ":generateContent" in str(m.get("supportedGenerationMethods", [])):
+                methods = m.get("supportedGenerationMethods", []) or []
+                if any("generateContent" in str(meth) for meth in methods):
                     models.append(name)
             return models
     except Exception as e:
@@ -272,7 +303,7 @@ async def check_health(*, provider: str = None, ollama_url: str = None,
 # Embeddings (used by RAG ChromaDB when provider is Google)
 # ---------------------------------------------------------------------------
 
-DEFAULT_GOOGLE_EMBEDDING_MODEL = "text-embedding-004"
+DEFAULT_GOOGLE_EMBEDDING_MODEL = "gemini-embedding-001"
 
 
 def _google_embed_batch_sync(cfg: LLMConfig, texts: list) -> list:

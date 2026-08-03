@@ -40,7 +40,7 @@ _PREFERRED_MODELS = [
 async def _pick_model(cfg: LLMConfig) -> str:
     """Pick the best available model for the active provider."""
     if cfg.is_google:
-        return cfg.google_model or "gemini-2.5-flash"
+        return cfg.google_model or "gemini-flash-latest"
     try:
         avail = await list_models(
             provider=cfg.provider,

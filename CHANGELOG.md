@@ -5,6 +5,20 @@ All notable changes to the Sentinel project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-02
+
+### Fixed
+
+- **Gemini model listing filter**: The model-list parser checked for `":generateContent"` but the Google API returns plain `["generateContent"]`, which filtered out every model and made provider health checks always fail. Now correctly matches generation-capable models.
+- **Free-tier model defaults**: `gemini-2.5-flash` is retired for new (free-tier) keys, and `text-embedding-004` is unavailable. Defaults changed to **`gemini-flash-latest`** (generation) and **`gemini-embedding-001`** (RAG embeddings) across the shared client, frontend, and `.env.example`.
+- **Automatic model fallback**: If the configured Gemini model returns HTTP 404 (retired) or 429 (quota), generation now falls back through `gemini-flash-latest` → `gemini-3.1-flash-lite` → `gemini-3.5-flash` instead of failing.
+- **AI provider label**: Dashboard status pill now reads "AI: ..." instead of "Ollama: ...".
+
+### Changed
+
+- Settings modal auto-opens on boot when no provider is configured, prompting the user to add a Google AI Studio API key (or start Ollama).
+- Portal auto-detection (`detect_portal`) now passes the active provider configuration to the hunter sidecar.
+
 ## [1.4.0] - 2026-08-02
 
 ### Added

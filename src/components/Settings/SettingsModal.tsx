@@ -13,7 +13,7 @@ interface Props {
 export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Props) {
   const [provider, setProvider] = useState<'google' | 'ollama'>('google');
   const [googleApiKey, setGoogleApiKey] = useState('');
-  const [googleModel, setGoogleModel] = useState('gemini-2.5-flash');
+  const [googleModel, setGoogleModel] = useState('gemini-flash-latest');
   const [ollamaModel, setOllamaModel] = useState('');
   const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
   const [models, setModels] = useState<string[]>([]);
@@ -57,7 +57,7 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
     if (currentSettings) {
       setProvider(currentSettings.provider === 'ollama' ? 'ollama' : 'google');
       setGoogleApiKey(currentSettings.googleApiKey || '');
-      setGoogleModel(currentSettings.googleModel || 'gemini-2.5-flash');
+      setGoogleModel(currentSettings.googleModel || 'gemini-flash-latest');
       setOllamaModel(currentSettings.ollamaModel || '');
       setOllamaUrl(currentSettings.ollamaUrl || 'http://127.0.0.1:11434');
     }
@@ -74,7 +74,7 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
     onSave({
       provider,
       googleApiKey: googleApiKey.trim(),
-      googleModel: googleModel.trim() || 'gemini-2.5-flash',
+      googleModel: googleModel.trim() || 'gemini-flash-latest',
       ollamaModel,
       ollamaUrl,
     });
@@ -215,7 +215,7 @@ export function SettingsModal({ isOpen, onClose, onSave, currentSettings }: Prop
                   <input
                     value={googleModel}
                     onChange={(e) => setGoogleModel(e.target.value)}
-                    placeholder="e.g. gemini-2.5-flash"
+                    placeholder="e.g. gemini-flash-latest"
                     style={{
                       flex: 1,
                       padding: '8px',

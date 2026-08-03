@@ -24,7 +24,7 @@ async def analyze_portal(url: str, provider_config: dict = None) -> dict:
     cfg = provider_config or {}
     provider = (cfg.get("provider") or os.environ.get("LLM_PROVIDER", "google")).lower()
     google_api_key = cfg.get("google_api_key") or os.environ.get("GOOGLE_API_KEY", "")
-    google_model = cfg.get("google_model") or os.environ.get("GOOGLE_LLM_MODEL", "gemini-2.5-flash")
+    google_model = cfg.get("google_model") or os.environ.get("GOOGLE_LLM_MODEL", "gemini-flash-latest")
     ollama_url = (cfg.get("ollama_url") or os.environ.get("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
 
     print(json.dumps({

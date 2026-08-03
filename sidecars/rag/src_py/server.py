@@ -139,7 +139,7 @@ async def _execute_query(query: str, provider_config: dict = None) -> dict:
     )
 
     if cfg.is_google:
-        selected_model = cfg.google_model or "gemini-2.5-flash"
+        selected_model = cfg.google_model or "gemini-flash-latest"
         logger.info(f"Generating Gemini answer using model: {selected_model}")
         answer = await generate(
             prompt,
