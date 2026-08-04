@@ -5,6 +5,17 @@ All notable changes to the Sentinel project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-08-05
+
+### Added
+
+- **Structured JSON output mode**: The shared LLM client now accepts a `json_mode` flag that requests `responseMimeType: application/json` from Gemini and `format: json` from Ollama. Hunt extraction, add-from-link, portal selector detection, and gap analysis all enable it, and the hunt extractor now uses the robust `extract_json` parser (strips markdown fences / extracts the JSON substring) instead of a raw `json.loads`.
+
+### Changed
+
+- **Pure-Python sidecars**: Sidecars always run as Python scripts. The `externalBin` Tauri config, `build.rs` dummy-binary generation, `src-tauri/binaries/`, `scripts/create_dummy_sidecars.js`, and `scripts/compile_sidecars.bat/.sh` (plus the `install.sh` call) were removed. This eliminates the error 216 (`ERROR_EXE_MACHINE_TYPE_MISMATCH`) seen at boot when Tauri tried to spawn the placeholder files.
+- **Rust build cache on NTFS**: `run.bat` and `setup.bat` now set `CARGO_TARGET_DIR=%LOCALAPPDATA%\sentinel\target` when unset, moving the incremental cache off exFAT drives (which lack hard-link support) to avoid the "hard linking files in the incremental compilation cache failed" fallback that slowed every build.
+
 ## [1.4.1] - 2026-08-02
 
 ### Fixed

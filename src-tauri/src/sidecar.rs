@@ -84,64 +84,42 @@ pub async fn spawn_python_sidecar(
         return Ok(child);
     }
 
-    // Try compiled binary first; fall back to Python script for development mode
-    let result = match app.shell().sidecar(sidecar_name) {
-        Ok(sidecar_cmd) => {
-            info!("Spawning sidecar as compiled binary: {}", sidecar_name);
-            match sidecar_cmd.spawn() {
-                Ok(r) => Ok(r),
-                Err(e) => {
-                    warn!("Binary spawn failed ({}), falling back to Python", e);
-                    Err(())
-                }
-            }
-        }
-        Err(err) => {
-            warn!("Compiled sidecar '{}' not found ({}), falling back to Python", sidecar_name, err);
-            Err(())
-        }
+    // Sidecars always run as Python scripts.
+    let script_path = match sidecar_name {
+        "hunter"    => "sidecars/hunter/src_py/server.py",
+        "rag"       => "sidecars/rag/src_py/server.py",
+        "gap_engine"=> "sidecars/gap_engine/src_py/server.py",
+        "worker"    => "sidecars/worker/src_py/server.py",
+        _ => return Err(crate::errors::SentinelError::Sidecar(format!("Unknown sidecar: {}", sidecar_name))),
     };
 
-    let (mut rx, child) = match result {
-        Ok(r) => r,
-        Err(_) => {
-            let script_path = match sidecar_name {
-                "hunter"    => "sidecars/hunter/src_py/server.py",
-                "rag"       => "sidecars/rag/src_py/server.py",
-                "gap_engine"=> "sidecars/gap_engine/src_py/server.py",
-                "worker"    => "sidecars/worker/src_py/server.py",
-                _ => return Err(crate::errors::SentinelError::Sidecar(format!("Unknown sidecar: {}", sidecar_name))),
-            };
+    info!("Spawning Python sidecar: {}", script_path);
 
-            info!("Falling back to Python script: {}", script_path);
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent()
+        .expect("CARGO_MANIFEST_DIR parent is workspace root");
+    let full_script_path = workspace_root.join(script_path);
 
-            let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let workspace_root = manifest_dir.parent()
-                .expect("CARGO_MANIFEST_DIR parent is workspace root");
-            let full_script_path = workspace_root.join(script_path);
+    if !full_script_path.exists() {
+        return Err(crate::errors::SentinelError::Sidecar(format!(
+            "Sidecar '{}' Python script not found at {}",
+            sidecar_name,
+            full_script_path.display()
+        )));
+    }
 
-            if !full_script_path.exists() {
-                return Err(crate::errors::SentinelError::Sidecar(format!(
-                    "Sidecar '{}' binary missing and Python script not found at {}",
-                    sidecar_name,
-                    full_script_path.display()
-                )));
-            }
+    let cmd = app
+        .shell()
+        .command("python")
+        .args([full_script_path.to_str().unwrap_or_default()])
+        .env("PYTHONPATH", workspace_root.to_str().unwrap_or_default());
 
-            let cmd = app
-                .shell()
-                .command("python")
-                .args([full_script_path.to_str().unwrap_or_default()])
-                .env("PYTHONPATH", workspace_root.to_str().unwrap_or_default());
-
-            cmd.spawn().map_err(|e| {
-                crate::errors::SentinelError::Sidecar(format!(
-                    "Failed to spawn Python sidecar '{}': {}",
-                    sidecar_name, e
-                ))
-            })?
-        }
-    };
+    let (mut rx, child) = cmd.spawn().map_err(|e| {
+        crate::errors::SentinelError::Sidecar(format!(
+            "Failed to spawn Python sidecar '{}': {}",
+            sidecar_name, e
+        ))
+    })?;
 
     let child_arc = Arc::new(Mutex::new(Some(child)));
     

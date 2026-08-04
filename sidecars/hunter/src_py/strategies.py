@@ -739,6 +739,7 @@ Content:
                     provider=provider_cfg["provider"],
                     ollama_url=provider_cfg["ollama_url"],
                     google_api_key=provider_cfg["google_api_key"],
+                    json_mode=True,
                 )
 
                 if response_text:
@@ -756,10 +757,10 @@ Content:
 
                     if not is_refusal:
                         try:
-                            parsed_data = json.loads(response_text)
+                            parsed_data = extract_json(response_text)
                             parsed = parsed_data
                             success = True
-                        except json.JSONDecodeError as decode_err:
+                        except Exception as decode_err:
                             logger.warning(
                                 f"[{keyword}] LLM response was not valid JSON: {response_text[:200]}, error: {str(decode_err)}"
                             )

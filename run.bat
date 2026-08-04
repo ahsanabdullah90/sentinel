@@ -4,6 +4,13 @@ setlocal enabledelayedexpansion
 :: Add Rust cargo binary path if present
 if exist "%USERPROFILE%\.cargo\bin" set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 
+:: Keep the Rust incremental cache on an NTFS drive (the workspace drive may be
+:: exFAT, which has no hard-link support and slows every build down)
+if "%CARGO_TARGET_DIR%"=="" (
+    set "CARGO_TARGET_DIR=%LOCALAPPDATA%\sentinel\target"
+    if not exist "%CARGO_TARGET_DIR%" mkdir "%CARGO_TARGET_DIR%"
+)
+
 echo ===================================================
 echo   Sentinel RFP Agent - Launch and Lifecycle Manager
 echo ===================================================

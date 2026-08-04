@@ -130,6 +130,7 @@ Content:
                 provider=cfg.provider,
                 ollama_url=cfg.ollama_url,
                 google_api_key=cfg.google_api_key,
+                json_mode=True,
             )
 
             if not response_text:

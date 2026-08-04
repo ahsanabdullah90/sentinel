@@ -94,6 +94,7 @@ async def analyze_portal(url: str, provider_config: dict = None) -> dict:
                         provider=provider,
                         ollama_url=ollama_url,
                         google_api_key=google_api_key,
+                        json_mode=True,
                     )
                     if response_text:
                         parsed = extract_json(response_text)

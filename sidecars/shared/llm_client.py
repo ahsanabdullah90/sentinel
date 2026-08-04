@@ -79,7 +79,7 @@ class LLMConfig:
 
 
 def _google_generate_sync(cfg: LLMConfig, prompt: str, system: str = None,
-                          images: list = None) -> str:
+                          images: list = None, json_mode: bool = False) -> str:
     """Call the Gemini generateContent REST API (blocking).
 
     If the configured model is retired / quota-limited, falls back through
@@ -94,7 +94,7 @@ def _google_generate_sync(cfg: LLMConfig, prompt: str, system: str = None,
         if not model:
             continue
         try:
-            return _google_generate_one(cfg, model, prompt, system, images)
+            return _google_generate_one(cfg, model, prompt, system, images, json_mode)
         except urllib.error.HTTPError as e:
             last_err = e
             # Only fall through on 404 (model retired) or 429 (quota/demand)
@@ -107,7 +107,8 @@ def _google_generate_sync(cfg: LLMConfig, prompt: str, system: str = None,
 
 
 def _google_generate_one(cfg: LLMConfig, model: str, prompt: str,
-                         system: str = None, images: list = None) -> str:
+                         system: str = None, images: list = None,
+                         json_mode: bool = False) -> str:
     contents: list = []
     if system:
         contents.append({"role": "user", "parts": [{"text": system}]})
@@ -122,9 +123,13 @@ def _google_generate_one(cfg: LLMConfig, model: str, prompt: str,
             })
     contents.append({"role": "user", "parts": user_parts})
 
+    generation_config = {"temperature": 0.1}
+    if json_mode:
+        generation_config["responseMimeType"] = "application/json"
+
     payload = {
         "contents": contents,
-        "generationConfig": {"temperature": 0.1},
+        "generationConfig": generation_config,
     }
 
     url = f"{GOOGLE_API_BASE}/models/{model}:generateContent?key={cfg.google_api_key}"
@@ -179,7 +184,7 @@ def _google_health_sync(cfg: LLMConfig) -> bool:
 
 
 def _ollama_generate_sync(cfg: LLMConfig, prompt: str, system: str = None,
-                          images: list = None) -> str:
+                          images: list = None, json_mode: bool = False) -> str:
     """Call the Ollama generate API (blocking)."""
     payload = {
         "model": cfg.ollama_model,
@@ -187,6 +192,8 @@ def _ollama_generate_sync(cfg: LLMConfig, prompt: str, system: str = None,
         "stream": False,
         "options": {"temperature": 0.1},
     }
+    if json_mode:
+        payload["format"] = "json"
     if system:
         payload["system"] = system
     if images:
@@ -235,7 +242,8 @@ def _ollama_health_sync(cfg: LLMConfig) -> bool:
 
 async def generate(prompt: str, *, model: str = None, provider: str = None,
                    ollama_url: str = None, google_api_key: str = None,
-                   system: str = None, images: list = None) -> str:
+                   system: str = None, images: list = None,
+                   json_mode: bool = False) -> str:
     """Generate text using the active provider.
 
     Args:
@@ -246,6 +254,8 @@ async def generate(prompt: str, *, model: str = None, provider: str = None,
         google_api_key: Google AI Studio API key.
         system: Optional system instruction.
         images: Optional list of base64-encoded image strings.
+        json_mode: When True, request structured JSON output from the provider
+            (Gemini ``responseMimeType`` or Ollama ``format``).
 
     Returns:
         Generated response text.
@@ -266,10 +276,10 @@ async def generate(prompt: str, *, model: str = None, provider: str = None,
 
     if cfg.is_google:
         return await asyncio.get_running_loop().run_in_executor(
-            None, lambda: _google_generate_sync(cfg, prompt, system, images)
+            None, lambda: _google_generate_sync(cfg, prompt, system, images, json_mode)
         )
     return await asyncio.get_running_loop().run_in_executor(
-        None, lambda: _ollama_generate_sync(cfg, prompt, system, images)
+        None, lambda: _ollama_generate_sync(cfg, prompt, system, images, json_mode)
     )
 
 
