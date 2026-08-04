@@ -53,7 +53,7 @@ if not exist "node_modules" (
 netstat -ano | findstr :11434 >nul
 if %errorlevel% neq 0 (
     echo [i] Ollama not detected on port 11434.
-    echo [i] The app will use Google Gemini (cloud) unless Ollama is started.
+    echo [i] The app will use Google Gemini cloud unless Ollama is started.
     echo [i] Tip: run "ollama serve" to enable the local provider.
 ) else (
     echo [OK] Ollama service detected on port 11434.
